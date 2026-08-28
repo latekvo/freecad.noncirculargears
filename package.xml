@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>freecad.noncirculargears workbench</name>
+  <description>A pair of meshing non-circular gears from a gear ratio function</description>
+  <version>0.1</version>
+  <date>2026-08-28</date>
+  <maintainer email="latkaignacy@gmail.com">LatekVon</maintainer>
+  <license>GPL-3.0-or-later</license>
+  <icon>freecad/noncirculargears/icons/noncirculargear.svg</icon>
+
+  <content>
+    <workbench>
+      <classname>NonCircularGearWorkbench</classname>
+      <subdirectory>./</subdirectory>
+      <freecadmin>0.19</freecadmin>
+      <tag>gear</tag>
+      <tag>gears</tag>
+      <tag>non-circular</tag>
+    </workbench>
+    <depend type="workbench">freecad.gears workbench</depend>
+    <depend>numpy</depend>
+  </content>
+
+</package>
