@@ -45,14 +45,16 @@ editing the driver rebuilds both.
 | `mode` | whether `function` is the gear ratio or the first gear's pitch radius |
 | `function` | `f(x)`, Python, with the `math` module's names in scope |
 | `center_distance` | distance between the axes; solved for in pitch radius mode |
-| `num_teeth` | teeth, the same number on both gears |
+| `num_teeth` | teeth on the driving gear |
+| `mate_turns`, `driver_turns` | turns each gear makes against the other |
 | `height` | extrusion height; `0` leaves the bare outline |
 | `tooth_height` | tooth height above the pitch line, as a fraction of the circular pitch |
 | `backlash` | gap held open between the two tooth surfaces |
 | `samples`, `points_per_tooth` | how finely `f(x)` and the outline are sampled |
 
-and five read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
-`max_ratio`, and `tooth_interference`, which the last section is about.
+and six read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
+`max_ratio`, `mate_teeth`, and `tooth_interference`, which the last section is
+about.
 
 ## The two modes
 
@@ -68,17 +70,44 @@ of "give me the shapes of two gears" meet in the same pipeline, since a ratio
 of `f` is a radius of `a / (1 + f)` and a radius of `r` is a ratio of
 `(a - r) / r`.
 
+## How often the mate turns
+
+`mate_turns` and `driver_turns` are how many turns each gear makes against the
+other, and both start at 1. Raise `mate_turns` for a mate that turns faster
+than the driver and comes out smaller than it; raise `driver_turns` for one
+that turns slower and comes out bigger.
+
+One period of the driver meshes with one period of the mate, so those two
+counts are also how many periods each gear is built from - `mate_turns = 2` is
+a driver of two periods turning a single-period mate twice over. Which puts two
+conditions on the rest of the parameters, and a pair that misses either is
+refused rather than drawn wrong:
+
+- `f(x)` has to repeat as often as the driver has periods, since the driver
+  really does have that many identical ones. `1 + 0.45 * cos(2 * x)` for
+  `mate_turns = 2`.
+- `num_teeth` has to divide among those periods, since both gears' teeth stand
+  at one pitch along the arc the two roll off together. The mate's own count
+  follows from that and is reported as `mate_teeth`: 24 teeth turning 2:1
+  leaves the mate 12.
+
+Neither is asked of a mate that turns *slower*, which is one period of the
+driver against several of the mate: any `f(x)` and any `num_teeth` will do, and
+the mate comes out with `driver_turns` times as many teeth.
+
+![f(x) = 1 + 0.45 * cos(2 * x) with mate_turns = 2](docs/pair-two-to-one.png)
+
 ## Two things worth knowing
 
 **Your `f(x)` may be scaled.** The second gear only closes into itself if the
-integral of `1 / f` over the turn comes to one full turn. In gear ratio mode
-nothing else can fix that, so `f` is multiplied by whatever constant does, and
-`ratio_scale` reports the factor. It is a constant, so the *variation* you
+integral of `1 / f` over the turn comes to a whole turn of it. In gear ratio
+mode nothing else can fix that, so `f` is multiplied by whatever constant does,
+and `ratio_scale` reports the factor. It is a constant, so the *variation* you
 asked for survives: `2 + cos(x)` still swings by a factor of three between its
-slowest and its fastest, whatever constant it is multiplied by. The
-average ratio over a turn is therefore always 1:1 - both gears turn once. In
-pitch radius mode the shape is kept exactly and the centre distance moves
-instead.
+slowest and its fastest, whatever constant it is multiplied by. The average
+ratio over a turn is therefore always the `mate_turns` against `driver_turns`
+you asked for and never something in between. In pitch radius mode the shape is
+kept exactly and the centre distance moves instead.
 
 **The teeth are approximate; the rolling is not.** The pitch lines roll on each
 other exactly - the contact stays on the line of centres and the delivered
@@ -94,10 +123,13 @@ Raising `num_teeth` lowers it too.
 
     freecadcmd tests/test_noncirculargears.py
 
-Thirty checks: both gears build as valid solids, the pitch points meet on
+Seventy-two checks: both gears build as valid solids, the pitch points meet on
 the line of centres, the delivered ratio is the one asked for, the teeth clear
-each other, both modes solve, and an `f(x)` that goes negative, does not parse,
-is not finite or reaches outside the `math` module is refused rather than drawn.
+each other and are counted off the built shapes, both modes solve, four pairs
+that turn at something other than 1:1 come out turning what they were asked to,
+and an `f(x)` that goes negative, does not parse, is not finite, reaches outside
+the `math` module or does not repeat as often as the turns need is refused
+rather than drawn.
 
 `tests/noncircular-gears.steps` drives the same thing through a real FreeCAD
 window with [ReproCAD](https://github.com/latekvo/ReproCAD) - its header has the

@@ -46,11 +46,17 @@ def stamp_version(obj):
 
 def solve(obj):
     """The pitch pair for ``obj``'s parameters, its center distance and ratio scale."""
-    values = noncircular.sample_function(obj.function, obj.samples)
+    driver_lobes, mate_lobes = noncircular.lobe_counts(obj.mate_turns, obj.driver_turns)
+    # f is sampled over the whole turn, so a driver that does not repeat as often
+    # as the turns ask for is caught rather than cut down to its first period.
+    per_period = -(-obj.samples // driver_lobes)
+    values = noncircular.sample_function(obj.function, per_period * driver_lobes)
     if obj.mode == "pitch radius":
-        pair, distance = noncircular.from_radius(values)
+        pair, distance = noncircular.from_radius(values, driver_lobes, mate_lobes)
         return pair, distance, 1.0
-    pair, scale = noncircular.from_ratio(values, obj.center_distance.Value)
+    pair, scale = noncircular.from_ratio(
+        values, obj.center_distance.Value, driver_lobes, mate_lobes
+    )
     return pair, obj.center_distance.Value, scale
 
 
@@ -113,9 +119,32 @@ class NonCircularGear(BaseGear):
             "num_teeth",
             "base",
             QT_TRANSLATE_NOOP(
-                "App::Property", "number of teeth, the same on both gears"
+                "App::Property",
+                "number of teeth on this gear; the mate gets mate_teeth, which "
+                "is the same only for a pair that turns 1:1",
             ),
         ).num_teeth = (24, 4, 400, 1)
+        obj.addProperty(
+            "App::PropertyIntegerConstraint",
+            "mate_turns",
+            "base",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "turns the mate makes for every driver_turns turns of this gear. "
+                "Above driver_turns, f(x) has to repeat mate_turns/gcd times over "
+                "the turn, and num_teeth be a multiple of that",
+            ),
+        ).mate_turns = (1, 1, 64, 1)
+        obj.addProperty(
+            "App::PropertyIntegerConstraint",
+            "driver_turns",
+            "base",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "turns this gear makes for every mate_turns turns of the mate; "
+                "raise it above mate_turns for a mate that turns slower",
+            ),
+        ).driver_turns = (1, 1, 64, 1)
         obj.addProperty(
             "App::PropertyLength",
             "height",
@@ -176,6 +205,12 @@ class NonCircularGear(BaseGear):
             ("min_ratio", "App::PropertyFloat", "smallest gear ratio over the turn"),
             ("max_ratio", "App::PropertyFloat", "largest gear ratio over the turn"),
             (
+                "mate_teeth",
+                "App::PropertyInteger",
+                "number of teeth on the mate, which follows from num_teeth and "
+                "the turns the two make",
+            ),
+            (
                 "tooth_interference",
                 "App::PropertyDistance",
                 "deepest the teeth cut into one another over a revolution; "
@@ -197,12 +232,12 @@ class NonCircularGear(BaseGear):
                     "{}: f(x) scaled by {:.6g} so the second gear closes into itself\n",
                 ).format(obj.Label, scale)
             )
+        driver, mate = profiles(obj, pair)
         obj.solved_center_distance = distance
         obj.ratio_scale = scale
         obj.min_ratio = pair.min_ratio
         obj.max_ratio = pair.max_ratio
-
-        driver, mate = profiles(obj, pair)
+        obj.mate_teeth = noncircular.mate_teeth(pair, obj.num_teeth)
         obj.tooth_interference = noncircular.interference(pair, driver, mate)
         return make_shape(driver, obj.height.Value)
 

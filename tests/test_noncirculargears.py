@@ -151,8 +151,8 @@ def test_rejects_bad_functions(document):
         document.removeObject(driver.Name)
 
 
-def test_pitch_lines_roll(document, driver, mate, steps=72):
-    """Turn the pair through one revolution and check the pitch lines keep contact.
+def test_pitch_lines_roll(document, driver, mate, label=""):
+    """Roll the pair through a period and check the pitch lines keep contact.
 
     The pitch point of each gear must be the same world point at every rolling
     position, and the delivered ratio must be the f(x) that was asked for. This
@@ -165,7 +165,7 @@ def test_pitch_lines_roll(document, driver, mate, steps=72):
     # by pi + phi2 brings its own to a - r2. They have to be the same point.
     separation = np.abs(pair.radius1 - (distance - pair.radius2)).max()
     check(
-        "the two pitch points meet on the line of centres",
+        "the two pitch points meet on the line of centres" + label,
         separation < 1e-9,
         "worst separation %.3g mm" % separation,
     )
@@ -175,21 +175,113 @@ def test_pitch_lines_roll(document, driver, mate, steps=72):
     inner = slice(2, -2)
     error = np.abs(delivered[inner] / -pair.ratio[inner] - 1.0).max()
     check(
-        "the delivered ratio is the f(x) that was asked for, counter-rotating",
+        "the delivered ratio is the f(x) that was asked for, counter-rotating" + label,
         error < 1e-4
         and np.all(np.gradient(turn1)[inner] * np.gradient(turn2)[inner] < 0),
         "worst relative error %.3g" % error,
     )
 
 
-def test_teeth_clear(document, driver, mate):
+def delivered_turns(driver):
+    """Turns the mate makes per turn of the driver, integrated from f(x) as drawn.
+
+    Taken from the property and the reported scale rather than from the solver,
+    so a pair that quietly closes on a different number of turns than it was
+    asked for cannot pass.
+    """
+    values = noncircular.sample_function(driver.function, driver.samples)
+    if driver.mode == "pitch radius":
+        ratio = (driver.solved_center_distance.Value - values) / values
+    else:
+        ratio = driver.ratio_scale * values
+    step = 2.0 * math.pi / len(ratio)
+    swept = 0.5 * (1.0 / ratio + np.roll(1.0 / ratio, -1)) * step
+    return float(swept.sum()) / (2.0 * math.pi)
+
+
+TURN_CASES = (
+    ("a mate that turns twice", {"function": "1 + 0.45 * cos(2 * x)", "mate_turns": 2}),
+    ("a mate that turns half as often", {"driver_turns": 2}),
+    (
+        "a mate that turns three times for every two",
+        {"function": "1 + 0.3 * cos(3 * x)", "mate_turns": 3, "driver_turns": 2},
+    ),
+    (
+        "a pitch radius whose mate turns twice",
+        {"mode": "pitch radius", "function": "30 - 6 * cos(2 * x)", "mate_turns": 2},
+    ),
+)
+
+
+def test_turns(document):
+    """Pairs asked to turn at something other than 1:1 on average.
+
+    The turns are read back out of the drawn pair - what f(x) integrates to and
+    how many teeth each shape came out with - rather than off the properties
+    that asked for them.
+    """
+    for name, overrides in TURN_CASES:
+        driver, mate = make_pair(document, **overrides)
+        label = ", %s" % name
+        check(
+            "%s recomputes" % name,
+            "Invalid" not in driver.State and "Invalid" not in mate.State,
+            "%s and %s" % (driver.State, mate.State),
+        )
+        if "Invalid" in driver.State or "Invalid" in mate.State:
+            continue
+
+        wanted = float(driver.mate_turns) / driver.driver_turns
+        turns = delivered_turns(driver)
+        check(
+            "the mate is drawn turning %g times per turn of the driver" % wanted,
+            abs(turns - wanted) < 1e-9,
+            "%.12f turns" % turns,
+        )
+        check(
+            "the two tooth counts share one pitch%s" % label,
+            abs(driver.mate_teeth * wanted - driver.num_teeth) < 1e-9,
+            "%d teeth against %d" % (driver.num_teeth, driver.mate_teeth),
+        )
+        test_pitch_lines_roll(document, driver, mate, label)
+        test_teeth_clear(document, driver, mate, label, bound=0.05)
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+
+
+def test_rejects_impossible_turns(document):
+    """Turns that no pair can be drawn at, refused rather than drawn wrong."""
+    for overrides, why in (
+        ({"mate_turns": 2}, "f(x) does not repeat twice over the turn"),
+        (
+            {"function": "1 + 0.45 * cos(2 * x)", "mate_turns": 2, "num_teeth": 25},
+            "num_teeth cannot be split between the driver's periods",
+        ),
+    ):
+        driver, mate = make_pair(document, **overrides)
+        check(
+            "refused because %s" % why,
+            "Invalid" in driver.State,
+            driver.State,
+        )
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+
+
+def tooth_height(driver, pair):
+    """How tall a tooth is, in mm, for the pair the driver's parameters solved to."""
+    per_period = noncircular.teeth_per_period(pair, driver.num_teeth)
+    return driver.tooth_height * pair.arc_length / per_period
+
+
+def test_teeth_clear(document, driver, mate, label="", bound=0.02):
     """The teeth are a wave on the pitch lines, so they are checked, not assumed."""
     pair, _, _ = solve(driver)
-    tooth = driver.tooth_height * pair.arc_length / driver.num_teeth
+    tooth = tooth_height(driver, pair)
 
     check(
-        "the teeth barely graze each other with no backlash",
-        0.0 < driver.tooth_interference.Value < 0.02 * tooth,
+        "the teeth barely graze each other with no backlash" + label,
+        0.0 < driver.tooth_interference.Value < bound * tooth,
         "%.4f mm into a %.3f mm tooth (%.2f%%)"
         % (
             driver.tooth_interference.Value,
@@ -201,41 +293,55 @@ def test_teeth_clear(document, driver, mate):
     driver.backlash = "0.1 mm"
     document.recompute()
     check(
-        "backlash holds the teeth apart",
+        "backlash holds the teeth apart" + label,
         driver.tooth_interference.Value < 0.0,
         "%.4f mm" % driver.tooth_interference.Value,
     )
     driver.backlash = "0 mm"
     document.recompute()
 
-    for name, gear in (("driver", driver), ("mate", mate)):
+    for name, gear, expected in (
+        ("driver", driver, driver.num_teeth),
+        ("mate", mate, driver.mate_teeth),
+    ):
+        counted = count_teeth(gear, tooth)
         check(
-            "the %s was cut with the requested number of teeth" % name,
-            count_teeth(gear) == driver.num_teeth,
-            "%d teeth on the built shape, %d asked for"
-            % (count_teeth(gear), driver.num_teeth),
+            "the %s was cut with the number of teeth it is meant to have%s"
+            % (name, label),
+            counted == expected,
+            "%d teeth on the built shape, %d expected" % (counted, expected),
         )
 
     separation = driver.Shape.distToShape(mate.Shape)[0]
     check(
-        "the two solids are drawn touching, not apart",
+        "the two solids are drawn touching, not apart" + label,
         separation < 1e-6,
         "%.3g mm between them" % separation,
     )
 
 
-def count_teeth(gear, samples=6400):
+def count_teeth(gear, tooth, samples=6400):
     """Teeth on the built shape, counted as maxima of its outline's radius.
 
     Read off the solid rather than the arrays that made it, so a shape built
     with the wrong tooth count cannot pass. The default is sixteen points per
     tooth at the most teeth the workbench allows.
+
+    A maximum has to stand a tenth of ``tooth`` above the outline either side of
+    it to count: the spline through a gear built in periods puts a maximum of a
+    few times 1e-15 mm at each join between them, which is a tooth to nobody.
     """
     outline = min(gear.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
     center = gear.Placement.Base
     points = outline.discretize(Number=samples)
     radius = np.array([(point - center).Length for point in points])
-    return int(np.sum((radius > np.roll(radius, 1)) & (radius >= np.roll(radius, -1))))
+    rising = radius > np.roll(radius, 1)
+    peaks = np.flatnonzero(rising & (radius >= np.roll(radius, -1)))
+    valleys = np.flatnonzero(~rising & (radius <= np.roll(radius, -1)))
+    after = np.searchsorted(valleys, peaks)
+    # index -1 and index len are the valleys the closed outline wraps around to
+    shoulder = np.maximum(radius[valleys[after - 1]], radius[valleys[after % len(valleys)]])
+    return int(np.sum(radius[peaks] - shoulder > 0.1 * tooth))
 
 
 def main():
@@ -244,7 +350,9 @@ def main():
     test_pitch_lines_roll(document, driver, mate)
     test_teeth_clear(document, driver, mate)
     test_pitch_radius_mode(document)
+    test_turns(document)
     test_rejects_bad_functions(document)
+    test_rejects_impossible_turns(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))
