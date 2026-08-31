@@ -116,7 +116,7 @@ kept exactly and the centre distance moves instead.
 
 **The teeth are approximate; the rolling is not.** The pitch lines roll on each
 other exactly - the contact stays on the line of centres and the delivered
-ratio is the `f(x)` you asked for to about one part in 10^5. The teeth are a
+ratio is the `f(x)` you asked for to a few parts in 10^5. The teeth are a
 sine wave laid along the arc length of each pitch line in antiphase, not
 conjugate flanks, so a tooth passes about a hundredth of its own height into
 the gap it meshes with. `tooth_interference` measures exactly that, over a

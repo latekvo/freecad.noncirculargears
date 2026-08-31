@@ -347,8 +347,10 @@ def interference(pair, driver, mate, steps=719):
     A tooth is worst somewhere partway through meshing, so what matters is how
     many phases *within* one tooth pitch get sampled. A step count tied to the
     tooth count falls into step with the teeth and revisits the same handful of
-    phases; a prime one does not. 719 agrees with a sweep seven times as dense
-    to the last digit, at every tooth count this allows.
+    phases; a prime one does not. Against a sweep seven times as dense, 719
+    lands on the same figure at most tooth counts this allows and reads low by
+    at most a twenty-fifth at the rest - a coarser sweep can only miss the
+    position where a tooth is deepest in, never invent one.
     """
     angle, radius = _radius_by_angle(driver)
     worst = -float("inf")
