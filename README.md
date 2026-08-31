@@ -40,6 +40,11 @@ gear; `NonCircularGearMate` links to it, draws the gear that meshes with it,
 and places itself - so its `Placement` is driven rather than edited, and
 editing the driver rebuilds both.
 
+**Gear Pair** puts them in the document and opens them in a dialog whose rows
+are the driving gear's own properties, so a pair is set up as it is added and
+the one in the view is rebuilt at every change. OK keeps it, Cancel takes it
+back out, and the property editor reaches the same properties afterwards.
+
 | property | |
 |---|---|
 | `mode` | whether `function` is the gear ratio or the first gear's pitch radius |
@@ -79,7 +84,7 @@ that turns slower and comes out bigger.
 
 One period of the driver meshes with one period of the mate, so those two
 counts are also how many periods each gear is built from - `mate_turns = 2` is
-a driver of two periods turning a single-period mate twice over. Which puts two
+a driver of two periods turning a single-period mate twice over. That puts two
 conditions on the rest of the parameters, and a pair that misses either is
 refused rather than drawn wrong:
 
@@ -123,19 +128,20 @@ Raising `num_teeth` lowers it too.
 
     freecadcmd tests/test_noncirculargears.py
 
-Seventy-two checks: both gears build as valid solids, the pitch points meet on
+Eighty-three checks: both gears build as valid solids, the pitch points meet on
 the line of centres, the delivered ratio is the one asked for, the teeth clear
 each other and are counted off the built shapes, both modes solve, four pairs
 that turn at something other than 1:1 come out turning what they were asked to,
-and an `f(x)` that goes negative, does not parse, is not finite, reaches outside
-the `math` module or does not repeat as often as the turns need is refused
-rather than drawn.
+an `f(x)` that goes negative, does not parse, is not finite, reaches outside the
+`math` module or does not repeat as often as the turns need is refused rather
+than drawn, and the dialog is built and typed into rather than described.
 
 `tests/noncircular-gears.steps` drives the same thing through a real FreeCAD
 window with [ReproCAD](https://github.com/latekvo/ReproCAD) - its header has the
 command - and `docs/noncircular-gears.mp4` is that run: the pair built from one
-menu entry, its computed values read off the property editor, and then `f(x)`
-retyped in place so both gears rebuild.
+menu entry, `f(x)` and `mate_turns` typed into the dialog with both gears
+rebuilding behind it, what it came out at read off the property editor, and then
+`f(x)` retyped there so both gears rebuild again.
 
 ![the default pair, and what it came out at](docs/pair-default.png)
 

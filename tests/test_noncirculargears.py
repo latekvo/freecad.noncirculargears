@@ -11,6 +11,7 @@ other over one too.
 """
 
 import math
+import os
 import sys
 import traceback
 
@@ -18,9 +19,13 @@ import numpy as np
 
 import FreeCAD as App
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide import QtWidgets  # noqa: E402, after the platform is chosen
+
 from freecad.noncirculargears import noncircular
 from freecad.noncirculargears.commands import CreateNonCircularGearPair
 from freecad.noncirculargears.noncirculargear import solve
+from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
 
 FAILURES = []
 
@@ -268,7 +273,7 @@ def test_rejects_impossible_turns(document):
         document.removeObject(driver.Name)
 
 
-def tooth_height(driver, pair):
+def tooth_size(driver, pair):
     """How tall a tooth is, in mm, for the pair the driver's parameters solved to."""
     per_period = noncircular.teeth_per_period(pair, driver.num_teeth)
     return driver.tooth_height * pair.arc_length / per_period
@@ -277,7 +282,7 @@ def tooth_height(driver, pair):
 def test_teeth_clear(document, driver, mate, label="", bound=0.02):
     """The teeth are a wave on the pitch lines, so they are checked, not assumed."""
     pair, _, _ = solve(driver)
-    tooth = tooth_height(driver, pair)
+    tooth = tooth_size(driver, pair)
 
     check(
         "the teeth barely graze each other with no backlash" + label,
@@ -320,6 +325,123 @@ def test_teeth_clear(document, driver, mate, label="", bound=0.02):
     )
 
 
+def test_creation_dialog(document):
+    """The dialog the Gear Pair button opens, driven rather than described.
+
+    Its widgets are made and read here the way the dialog itself does, which is
+    everything about it apart from the click - a row for every parameter, values
+    that reach the gear, a refusal that says why, and a cancel that takes the
+    pair back out of the document.
+    """
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    document.openTransaction("dialog")
+    driver, mate = CreateNonCircularGearPair.create()
+    document.recompute()
+    panel = GearPairPanel(driver, mate)
+    rows = dict((row.name, row) for row in panel.rows)
+
+    check(
+        "the dialog has a row for each of the gear's own parameters",
+        sorted(rows) == sorted(parameters(driver)),
+        "%d rows: %s" % (len(rows), ", ".join(row.name for row in panel.rows)),
+    )
+    check(
+        "each row starts on what the gear is set to",
+        rows["function"].read() == driver.function
+        and rows["num_teeth"].read() == driver.num_teeth
+        and rows["center_distance"].read() == driver.center_distance.UserString,
+        "%r, %d teeth, %s"
+        % (rows["function"].read(), rows["num_teeth"].read(), rows["center_distance"].read()),
+    )
+
+    # The dropdown is the one row whose signal carries a value, and it reaches a
+    # handler that takes none, so it is changed on its own and through the signal.
+    rows["mode"].widget.setCurrentText("pitch radius")
+    check(
+        "changing a row rebuilds the pair without being asked to",
+        driver.mode == "pitch radius" and driver.ratio_scale == 1.0,
+        "%s, scale %g" % (driver.mode, driver.ratio_scale),
+    )
+    rows["mode"].widget.setCurrentText("gear ratio")
+
+    rows["function"].widget.setText("1 + 0.45 * cos(2 * x)")
+    rows["mate_turns"].widget.setValue(2)
+    rows["center_distance"].widget.setText("80 mm")
+    panel.apply()
+    check(
+        "what is typed into the dialog reaches the gear and rebuilds it",
+        driver.function == "1 + 0.45 * cos(2 * x)"
+        and driver.mate_turns == 2
+        and driver.mate_teeth == 12
+        and abs(driver.solved_center_distance.Value - 80.0) < 1e-9
+        and "Invalid" not in driver.State,
+        "%s, %d mate teeth, %s" % (driver.function, driver.mate_teeth, driver.State),
+    )
+
+    rows["num_teeth"].widget.setValue(25)
+    panel.apply()
+    check(
+        "a pair that cannot be built says so in the dialog",
+        "multiple of 2" in panel.status.text(),
+        repr(panel.status.text()),
+    )
+
+    rows["num_teeth"].widget.setValue(100000)
+    panel.apply()
+    check(
+        "a value past what the property allows comes back clamped",
+        driver.num_teeth == 400 and rows["num_teeth"].read() == 400,
+        "%d on the gear, %d in the dialog" % (driver.num_teeth, rows["num_teeth"].read()),
+    )
+
+    names = [driver.Name, mate.Name]
+    check("cancelling the dialog closes it", panel.reject() is True)
+    check(
+        "cancelling takes the pair back out of a document with no undo",
+        all(document.getObject(name) is None for name in names),
+        ", ".join(obj.Name for obj in document.Objects),
+    )
+
+    # The GUI has undo on, so cancelling there aborts the command's transaction
+    # rather than falling back on removing what it made.
+    document.UndoMode = 1
+    document.openTransaction("dialog")
+    driver, mate = CreateNonCircularGearPair.create()
+    document.recompute()
+    names = [driver.Name, mate.Name]
+    GearPairPanel(driver, mate).reject()
+    # Whatever comes next has to land in a transaction of its own, which it
+    # cannot if cancelling removed the pair but left the command's still open.
+    document.openTransaction("after cancelling")
+    document.addObject("App::FeaturePython", "probe")
+    document.commitTransaction()
+    check(
+        "cancelling aborts the transaction where there is one to abort",
+        all(document.getObject(name) is None for name in names)
+        and document.UndoNames == ["after cancelling"],
+        "%s left, undo stack %s"
+        % (", ".join(obj.Name for obj in document.Objects), document.UndoNames),
+    )
+    document.removeObject("probe")
+    document.UndoMode = 0
+
+    document.openTransaction("dialog")
+    driver, mate = CreateNonCircularGearPair.create()
+    document.recompute()
+    panel = GearPairPanel(driver, mate)
+    check("accepting the dialog closes it", panel.accept() is True)
+    check(
+        "accepting leaves the pair in the document, built",
+        document.getObject(driver.Name) is not None
+        and driver.Shape.ShapeType == "Solid"
+        and mate.Shape.ShapeType == "Solid",
+        "%s and %s" % (driver.State, mate.State),
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+
 def count_teeth(gear, tooth, samples=6400):
     """Teeth on the built shape, counted as maxima of its outline's radius.
 
@@ -353,6 +475,7 @@ def main():
     test_turns(document)
     test_rejects_bad_functions(document)
     test_rejects_impossible_turns(document)
+    test_creation_dialog(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))

@@ -23,6 +23,7 @@ from freecad import gui
 from freecad.gears.basegear import ViewProviderGear
 
 from .noncirculargear import NonCircularGear, NonCircularGearMate
+from .taskpanel import GearPairPanel
 
 QT_TRANSLATE_NOOP = app.Qt.QT_TRANSLATE_NOOP
 
@@ -39,15 +40,39 @@ class CreateNonCircularGearPair(object):
     )
 
     def IsActive(self):
-        return app.ActiveDocument is not None
+        return app.ActiveDocument is not None and not gui.Control.activeDialog()
 
     def Activated(self):
+        """Put a pair in the document, then open it for setting up.
+
+        The pair is built first and edited in place, so the dialog's every
+        parameter is one the gear itself has and each change shows in the 3D
+        view. It goes into a transaction of its own, which cancelling aborts and
+        so takes the pair back out again.
+        """
+        document = app.ActiveDocument
+        if gui.Control.activeDialog():
+            # The toolbar cannot reach this, but a macro calling it can, and the
+            # pair it made would be left with no dialog to finish or cancel it.
+            app.Console.PrintError(
+                app.Qt.translate(
+                    "Log", "close the open task dialog before starting a gear pair\n"
+                )
+            )
+            return
+
+        document.openTransaction("Create non-circular gear pair")
+        before = set(document.Objects)
         gui.doCommandGui("import freecad.noncirculargears.commands")
         gui.doCommandGui(
             "freecad.noncirculargears.commands.CreateNonCircularGearPair.create()"
         )
-        app.ActiveDocument.recompute()
+        document.recompute()
         gui.SendMsgToActiveView("ViewFit")
+
+        made = [obj for obj in document.Objects if obj not in before]
+        mate = next(obj for obj in made if hasattr(obj, "master"))
+        gui.Control.showDialog(GearPairPanel(mate.master, mate))
 
     @classmethod
     def create(cls):

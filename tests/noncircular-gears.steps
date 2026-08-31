@@ -6,12 +6,21 @@
 # The profile is a saved home whose Mod directory links to this workbench, so
 # the run loads it the way an installed addon is loaded.
 #
-# Two things are on screen rather than asserted: the pair appears meshed at one
-# click, and editing f(x) in the property editor rebuilds both gears - the
-# second gear is derived from the first, so it has to follow.
+# Three things are on screen rather than asserted: the pair appears meshed at
+# one click, the dialog that opens over it rebuilds both gears as it is filled
+# in, and editing f(x) in the property editor afterwards rebuilds them again -
+# the second gear is derived from the first, so it has to follow.
 #
 # Axonometric is a submenu, not a view: stopping on it leaves the whole View
 # menu open over the tree, and every step after it aims at a covered screen.
+#
+# The dialog's own steps are left to search the whole screen. It is a floating
+# Tasks panel in this profile and a docked one in others, so a region around
+# where it happens to sit is a region that only holds in one of them.
+#
+# Return inside the dialog presses its default button and takes the whole thing
+# with it, so its fields are left with Tab. The property editor's fields want
+# the opposite: Return is what commits an edit there.
 
 note step 1 - a new document
 menu File > New Document for:40
@@ -21,7 +30,7 @@ note step 2 - switch to the Non-Circular Gear workbench
 menu View > Workbench > Non-Circular Gear for:40
 sleep 8
 
-note step 3 - one command builds both gears
+note step 3 - one command builds both gears and opens them for setting up
 menu Non-Circular Gear > Gear Pair for:40
 sleep 10
 menu View > Standard views > Axonometric > Isometric for:40
@@ -29,29 +38,51 @@ sleep 3
 menu View > Standard views > Fit all for:40
 sleep 5
 
-note step 4 - select the driving gear; the second one is derived from it
-clickon NonCircularGear in:0,150,420,90 for:40
-sleep 5
-
-note step 5 - what the pair came out at: the ratio really does vary over the turn
-scroll 200 800 -8
-sleep 2
-waittext max ratio in:0,520,420,420 for:40
+note step 4 - every row of the dialog is a property of the gear itself
+waittext mate turns for:40
 sleep 8
 
-note step 6 - a different f(x): three lobes instead of one
+note step 5 - a mate that turns twice needs an f(x) that repeats twice
+field function for:40
+sleep 2
+key ctrl+a
+type 1 + 0.45 * cos(2 * x)
+key Tab
+sleep 10
+field mate turns for:40
+sleep 2
+key ctrl+a
+type 2
+key Tab
+sleep 12
+menu View > Standard views > Fit all for:40
+sleep 6
+
+note step 6 - OK keeps the pair the dialog was filled in for
+clickon OK for:40
+sleep 8
+
+note step 7 - what the pair came out at, the mate's own tooth count included
+clickon NonCircularGear in:0,150,420,90 for:40
+sleep 5
+scroll 200 800 -8
+sleep 2
+waittext mate teeth in:0,520,420,420 for:40
+sleep 8
+
+note step 8 - a different f(x), typed in place, and both gears rebuild
 scroll 200 800 8
 sleep 2
 field function in:0,520,420,420 for:40
 sleep 2
 key ctrl+a
-type 1 + 0.5 * cos(3 * x)
+type 1 + 0.45 * cos(4 * x)
 key Return
 sleep 12
 menu View > Standard views > Fit all for:40
 sleep 8
 
-note step 7 - from above, both gears rebuilt and still meshed
+note step 9 - from above, both gears rebuilt and still meshed
 menu View > Standard views > Top for:40
 sleep 4
 move 700 900
