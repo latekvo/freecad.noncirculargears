@@ -123,6 +123,8 @@ the gap it meshes with. `tooth_interference` measures exactly that, over a
 whole revolution, and `backlash` clears it: for the default pair, 0.012 mm of
 interference on a 1.07 mm tooth, and `backlash = 0.1 mm` takes it to -0.079 mm.
 Raising `num_teeth` lowers it too.
+[docs/involute-teeth.md](docs/involute-teeth.md) is what it would take to have
+flanks that need none of this.
 
 ## Checking it
 
