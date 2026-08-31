@@ -31,8 +31,7 @@ from PySide import QtWidgets
 
 from freecad import app
 
-# What the property editor's alphabetical order cannot say: what a pair is worth
-# deciding in, from the shape it makes down to how finely it is drawn.
+# The order a pair is worth deciding in, which alphabetical cannot carry.
 PARAMETER_ORDER = (
     "mode",
     "function",

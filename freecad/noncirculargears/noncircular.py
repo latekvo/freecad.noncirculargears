@@ -104,11 +104,9 @@ def sample_function(expression, count):
 def lobe_counts(mate_turns, driver_turns):
     """How many periods each gear carries, from the turns they make against each other.
 
-    One period of the driver meshes with one period of the mate, so over a turn
-    of the driver every period it has spends one period of the mate: a mate that
-    turns ``mate_turns`` times for every ``driver_turns`` turns of the driver has
-    those two counts as their periods, in lowest terms. Returns them in the order
-    (driver, mate), so 1:1 is one period each and the whole of both gears.
+    One period of the driver meshes with one of the mate, so the turns and the
+    periods are the same pair of numbers in lowest terms. Returned as (driver,
+    mate), which for 1:1 is one period each and so the whole of both gears.
     """
     mate_turns, driver_turns = int(mate_turns), int(driver_turns)
     common = math.gcd(mate_turns, driver_turns)
