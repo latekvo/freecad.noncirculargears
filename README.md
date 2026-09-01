@@ -148,7 +148,7 @@ mapping onto ncgears is and where it refuses.
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and sixteen checks: both gears build as valid solids, the pitch points
+A hundred and nineteen checks: both gears build as valid solids, the pitch points
 meet on the line of centres, the delivered ratio is the one asked for, the teeth
 clear each other and are counted off the built shapes, both modes solve, four
 pairs that turn at something other than 1:1 come out turning what they were
@@ -157,9 +157,11 @@ outside the `math` module or does not repeat as often as the turns need is
 refused rather than drawn, and the dialog is built and typed into rather than
 described.
 
-Thirty-three of those are involute teeth, and are skipped with a note when
-ncgears is not installed. To run them against an ncgears kept out of FreeCAD's
-own environment, put it on the path for the run:
+Thirty-six of those are involute teeth. Thirty-three need ncgears and are
+skipped with a note without it, leaving eighty-six that run either way - the
+other three are the ones that check what is said when it is missing. To run
+the lot against an ncgears kept out of FreeCAD's own environment, put it on
+the path for the run:
 
     freecadcmd -P path/to/site-packages tests/test_noncirculargears.py
 
