@@ -320,7 +320,10 @@ def _radius_by_angle(points):
     """A closed outline as radius against angle, wrapped for interpolation.
 
     Sound as long as the outline is star-shaped about its axis, which a pitch
-    line with r > 0 and teeth far shorter than r is.
+    line with r > 0 and a wave far shorter than r laid along it is. A flank
+    with a fillet under it is not: the angle doubles back a hundredth of a
+    radian at each root, and sorting by angle folds those points over the
+    teeth, which is why involute outlines are measured another way.
     """
     angle = np.arctan2(points[:, 1], points[:, 0]) % TWO_PI
     radius = np.hypot(points[:, 0], points[:, 1])

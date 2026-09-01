@@ -33,6 +33,12 @@ Link or copy this directory into FreeCAD's user `Mod` directory, beside
 Then pick **Non-Circular Gear** from the workbench list and use **Non-Circular
 Gear > Gear Pair**.
 
+Involute teeth are cut by [ncgears](https://github.com/kylebme/ncgears), which
+is optional: without it the wave teeth are exactly what they were, and asking
+for involute ones says what to install.
+
+    pip install ncgears
+
 ## What it makes
 
 Two objects. `NonCircularGear` carries every parameter and draws the driving
@@ -53,13 +59,15 @@ back out, and the property editor reaches the same properties afterwards.
 | `num_teeth` | teeth on the driving gear |
 | `mate_turns`, `driver_turns` | turns each gear makes against the other |
 | `height` | extrusion height; `0` leaves the bare outline |
+| `tooth_style` | a wave laid on the pitch line, or conjugate involute flanks |
 | `tooth_height` | tooth height above the pitch line, as a fraction of the circular pitch |
+| `pressure_angle` | angle the involute flanks press at; wave teeth have none |
 | `backlash` | gap held open between the two tooth surfaces |
 | `samples`, `points_per_tooth` | how finely `f(x)` and the outline are sampled |
 
-and six read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
-`max_ratio`, `mate_teeth`, and `tooth_interference`, which the last section is
-about.
+and seven read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
+`max_ratio`, `mate_teeth`, and the two the last section is about,
+`tooth_interference` and `transmission_error`.
 
 ## The two modes
 
@@ -114,29 +122,44 @@ ratio over a turn is therefore always the `mate_turns` against `driver_turns`
 you asked for and never something in between. In pitch radius mode the shape is
 kept exactly and the centre distance moves instead.
 
-**The teeth are approximate; the rolling is not.** The pitch lines roll on each
+**Wave teeth are approximate; the rolling is not.** The pitch lines roll on each
 other exactly - the contact stays on the line of centres and the delivered
-ratio is the `f(x)` you asked for to a few parts in 10^5. The teeth are a
-sine wave laid along the arc length of each pitch line in antiphase, not
+ratio is the `f(x)` you asked for to a few parts in 10^5. The default teeth are
+a sine wave laid along the arc length of each pitch line in antiphase, not
 conjugate flanks, so a tooth passes about a hundredth of its own height into
 the gap it meshes with. `tooth_interference` measures exactly that, over a
 whole revolution, and `backlash` clears it: for the default pair, 0.012 mm of
 interference on a 1.07 mm tooth, and `backlash = 0.1 mm` takes it to -0.079 mm.
 Raising `num_teeth` lowers it too.
-[docs/involute-teeth.md](docs/involute-teeth.md) is what it would take to have
-flanks that need none of this.
+
+**`tooth_style = involute` needs none of that, and costs seconds.** ncgears cuts
+flanks that are conjugate on the pitch line rather than laid over it, and the
+pair comes back to be placed rather than approximated: 2.4e-7 degrees of
+`transmission_error` for the default pair against 0.012 mm of interference for
+the wave. It takes five to fifteen seconds a pair rather than a tenth of a
+second, wants an `f(x)` SymPy can read, and needs `ncgears` installed. The two
+measures do not overlap - each reads 0 for the other's teeth - and
+[docs/involute-teeth.md](docs/involute-teeth.md) says why, along with what the
+mapping onto ncgears is and where it refuses.
 
 ## Checking it
 
     freecadcmd tests/test_noncirculargears.py
 
-Eighty-three checks: both gears build as valid solids, the pitch points meet on
-the line of centres, the delivered ratio is the one asked for, the teeth clear
-each other and are counted off the built shapes, both modes solve, four pairs
-that turn at something other than 1:1 come out turning what they were asked to,
-an `f(x)` that goes negative, does not parse, is not finite, reaches outside the
-`math` module or does not repeat as often as the turns need is refused rather
-than drawn, and the dialog is built and typed into rather than described.
+A hundred and sixteen checks: both gears build as valid solids, the pitch points
+meet on the line of centres, the delivered ratio is the one asked for, the teeth
+clear each other and are counted off the built shapes, both modes solve, four
+pairs that turn at something other than 1:1 come out turning what they were
+asked to, an `f(x)` that goes negative, does not parse, is not finite, reaches
+outside the `math` module or does not repeat as often as the turns need is
+refused rather than drawn, and the dialog is built and typed into rather than
+described.
+
+Thirty-three of those are involute teeth, and are skipped with a note when
+ncgears is not installed. To run them against an ncgears kept out of FreeCAD's
+own environment, put it on the path for the run:
+
+    freecadcmd -P path/to/site-packages tests/test_noncirculargears.py
 
 `tests/noncircular-gears.steps` drives the same thing through a real FreeCAD
 window with [ReproCAD](https://github.com/latekvo/ReproCAD) - its header has the

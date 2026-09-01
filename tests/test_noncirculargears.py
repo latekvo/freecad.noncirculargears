@@ -15,6 +15,10 @@ import os
 import sys
 import traceback
 
+# Redirected to a file, print would otherwise hold a whole run's results in a
+# buffer, and a crash in OCC takes the lot with it rather than the line before.
+sys.stdout.reconfigure(line_buffering=True)
+
 import numpy as np
 
 import FreeCAD as App
@@ -22,7 +26,7 @@ import FreeCAD as App
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide import QtWidgets  # noqa: E402, after the platform is chosen
 
-from freecad.noncirculargears import noncircular
+from freecad.noncirculargears import involute, noncircular
 from freecad.noncirculargears.commands import CreateNonCircularGearPair
 from freecad.noncirculargears.noncirculargear import solve
 from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
@@ -273,6 +277,175 @@ def test_rejects_impossible_turns(document):
         document.removeObject(driver.Name)
 
 
+INVOLUTE_CASES = (
+    ("", {}),
+    (", a mate that turns twice", {"function": "1 + 0.45 * cos(2 * x)", "mate_turns": 2}),
+    (", a mate that turns half as often", {"driver_turns": 2}),
+    (
+        ", from a pitch radius",
+        {"mode": "pitch radius", "function": "30 - 6 * cos(x)"},
+    ),
+)
+
+
+def test_involute_teeth(document):
+    """Involute flanks, which ncgears cuts and this workbench only places.
+
+    What is checked here is the part this workbench is answerable for: that the
+    pair comes back at the centre distance and tooth counts asked for, that it
+    builds, and that ncgears' own reading of the flanks it cut is carried
+    through to the gear. How conjugate the flanks are is ncgears' measurement,
+    not one repeated here - the sweep this workbench uses on wave teeth reads an
+    outline as a radius against an angle, which a flank with a fillet under it
+    is not.
+    """
+    if not involute.available():
+        print("--   involute checks skipped: ncgears is not installed")
+        return
+
+    for label, overrides in INVOLUTE_CASES:
+        driver, mate = make_pair(document, tooth_style="involute", **overrides)
+        pair, distance, _ = solve(driver)
+
+        check(
+            "involute driver builds a valid solid" + label,
+            driver.Shape.ShapeType == "Solid" and driver.Shape.isValid(),
+            driver.Shape.ShapeType,
+        )
+        check(
+            "involute mate builds a valid solid" + label,
+            mate.Shape.ShapeType == "Solid" and mate.Shape.isValid(),
+            mate.Shape.ShapeType,
+        )
+
+        tooth = tooth_size(driver, pair)
+        check(
+            "the involute driver was cut with the teeth it should have" + label,
+            count_teeth(driver, tooth) == driver.num_teeth,
+            "%d, expected %d" % (count_teeth(driver, tooth), driver.num_teeth),
+        )
+        check(
+            "the involute mate was cut with mate_teeth" + label,
+            count_teeth(mate, tooth) == driver.mate_teeth,
+            "%d, expected %d" % (count_teeth(mate, tooth), driver.mate_teeth),
+        )
+        check(
+            "the involute pair came back at the centre distance solved for" + label,
+            abs(driver.solved_center_distance.Value - distance) < 1e-6,
+            "%.9f against %.9f" % (driver.solved_center_distance.Value, distance),
+        )
+        check(
+            "ncgears reports the flanks as conjugate" + label,
+            0.0 < driver.transmission_error < 1e-4,
+            "%.3g degrees of transmission error" % driver.transmission_error,
+        )
+        check(
+            "the wave measure is left alone for involute teeth" + label,
+            driver.tooth_interference.Value == 0.0,
+            "%.6f" % driver.tooth_interference.Value,
+        )
+
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+
+
+def test_involute_thinning(document):
+    """The thinning ncgears' outlines go through, on one built to break it.
+
+    Driven straight rather than through a gear, because what it has to cope
+    with is what ncgears hands over - repeated points, a stretch sampled far
+    more finely than the rest, and a stretch barely sampled at all - and a gear
+    that happens not to have all three would not say whether it copes.
+    """
+    if not involute.available():
+        return
+
+    angle = np.linspace(0.0, 2.0 * np.pi, 240, endpoint=False)
+    ring = np.column_stack((20.0 * np.cos(angle), 20.0 * np.sin(angle)))
+    outline = np.vstack(
+        (
+            np.repeat(ring[:30], 4, axis=0),  # every point four times over
+            ring[30:200],
+            ring[200:201],  # and then a long way round to the start
+        )
+    )
+    thinned = involute._thinned(outline, 0.01, 0.4, 1.5)
+    steps = np.linalg.norm(np.diff(np.vstack((thinned, thinned[:1])), axis=0), axis=1)
+
+    check(
+        "thinning hands back no point twice",
+        steps.min() > 0.0,
+        "shortest step %.3e mm" % steps.min(),
+    )
+    check(
+        "thinning leaves every point on the outline it was given",
+        all(
+            np.abs(outline - point).sum(axis=1).min() == 0.0 for point in thinned
+        ),
+    )
+    check(
+        "thinning keeps the whole of the outline, not part of it",
+        len(thinned) > 30,
+        "%d points from %d" % (len(thinned), len(outline)),
+    )
+
+
+def test_involute_refusals(document):
+    """What involute teeth cannot be asked for, and whether it is said plainly."""
+    if not involute.available():
+        return
+
+    driver, mate = make_pair(
+        document, tooth_style="involute", function="1 + 0.4 * min(cos(x), 0.5)"
+    )
+    check(
+        "an f(x) SymPy cannot read is refused rather than drawn",
+        "Invalid" in driver.State or "Touched" in driver.State,
+        driver.State,
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+    driver, mate = make_pair(document, tooth_style="involute", tooth_height=0.0)
+    check(
+        "involute teeth with no height are refused",
+        "Invalid" in driver.State or "Touched" in driver.State,
+        driver.State,
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+
+def test_involute_says_what_is_missing(document):
+    """Without ncgears the wave teeth still work and the message names the package."""
+    blocked = dict(sys.modules)
+    sys.modules["ncgears"] = None
+    try:
+        check(
+            "involute teeth report themselves unavailable without ncgears",
+            not involute.available(),
+        )
+        try:
+            involute.outlines(None, "1", "gear ratio", 60.0, 1.0, 24, 0.14, 0.0, 20.0, 1024)
+        except involute.InvoluteUnavailable as err:
+            named = "ncgears" in str(err)
+        else:
+            named = False
+        check("the message names the package to install", named)
+    finally:
+        sys.modules.clear()
+        sys.modules.update(blocked)
+
+    driver, mate = make_pair(document)
+    check(
+        "wave teeth are unaffected by ncgears being absent",
+        "Invalid" not in driver.State and "Invalid" not in mate.State,
+        driver.State,
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+
 def tooth_size(driver, pair):
     """How tall a tooth is, in mm, for the pair the driver's parameters solved to."""
     per_period = noncircular.teeth_per_period(pair, driver.num_teeth)
@@ -499,6 +672,10 @@ def main():
     test_turns(document)
     test_rejects_bad_functions(document)
     test_rejects_impossible_turns(document)
+    test_involute_teeth(document)
+    test_involute_thinning(document)
+    test_involute_refusals(document)
+    test_involute_says_what_is_missing(document)
     test_creation_dialog(document)
 
     if FAILURES:

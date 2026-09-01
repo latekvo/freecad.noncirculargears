@@ -28,11 +28,13 @@ from freecad import part
 from freecad.gears.basegear import BaseGear, fcvec
 
 from . import __version__
+from . import involute
 from . import noncircular
 
 QT_TRANSLATE_NOOP = app.Qt.QT_TRANSLATE_NOOP
 
 MODES = ["gear ratio", "pitch radius"]
+STYLES = ["wave", "involute"]
 
 # Outline points per B-spline of the wire the gear is drawn from. Splines this
 # short are what keep the extrusion cheap to mesh; see ``outline_wire``.
@@ -64,15 +66,69 @@ def solve(obj):
     return pair, obj.center_distance.Value, scale
 
 
-def profiles(obj, pair):
-    """Both gears' outlines for the parameters on ``obj``."""
-    return noncircular.tooth_profiles(
+def profiles(obj, pair, scale):
+    """Both gears' outlines for the parameters on ``obj``.
+
+    Kept on the gear until one of the parameters it was cut from changes.
+    Both halves of a pair are drawn from the driving gear's outlines and
+    FreeCAD recomputes the two objects separately, so without this an involute
+    pair - which takes seconds to cut, not milliseconds - would be cut twice
+    over for every rebuild.
+    """
+    key = (
+        obj.tooth_style,
+        obj.mode,
+        obj.function,
+        obj.center_distance.Value,
+        int(obj.samples),
+        int(obj.mate_turns),
+        int(obj.driver_turns),
+        int(obj.num_teeth),
+        int(obj.points_per_tooth),
+        obj.tooth_height,
+        obj.backlash.Value,
+        obj.pressure_angle,
+    )
+    cached = getattr(obj.Proxy, "_profiles", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    cut = _cut_profiles(obj, pair, scale)
+    obj.Proxy._profiles = (key, cut)
+    return cut
+
+
+def _cut_profiles(obj, pair, scale):
+    """The two outlines and how far the pair strays from f(x), as each style measures it.
+
+    Each style is measured its own way, because neither measure fits the other
+    shape. A wave tooth is not conjugate, so what matters is how far it cuts
+    in. An involute flank is, so what matters is the motion it delivers - and
+    it cannot be put through the first measure at all, which reads an outline
+    as a radius against an angle and so needs one a flank with a fillet under
+    it does not give.
+    """
+    if obj.tooth_style == "involute":
+        drive, mate, error = involute.outlines(
+            pair,
+            obj.function,
+            obj.mode,
+            pair.center_distance,
+            scale,
+            obj.num_teeth,
+            obj.tooth_height,
+            obj.backlash.Value,
+            obj.pressure_angle,
+            obj.samples,
+        )
+        return drive, mate, 0.0, error
+    drive, mate = noncircular.tooth_profiles(
         pair,
         obj.num_teeth,
         obj.points_per_tooth,
         obj.tooth_height,
         obj.backlash.Value,
     )
+    return drive, mate, noncircular.interference(pair, drive, mate), 0.0
 
 
 def outline_wire(points, span=POINTS_PER_SPAN):
@@ -119,6 +175,18 @@ class NonCircularGear(BaseGear):
             QT_TRANSLATE_NOOP("App::Property", "what f(x) states about this gear"),
         )
         obj.mode = MODES
+        obj.addProperty(
+            "App::PropertyEnumeration",
+            "tooth_style",
+            "base",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "wave lays a sine along the pitch line, which is quick and "
+                "approximate; involute cuts flanks that roll on it properly, "
+                "which needs the ncgears package and takes seconds",
+            ),
+        )
+        obj.tooth_style = STYLES
         obj.addProperty(
             "App::PropertyString",
             "function",
@@ -195,15 +263,28 @@ class NonCircularGear(BaseGear):
             QT_TRANSLATE_NOOP(
                 "App::Property",
                 "gap held open between the two tooth surfaces; enough of it "
-                "makes tooth_interference negative",
+                "makes tooth_interference negative on wave teeth, and it is "
+                "cut into the flanks of involute ones",
             ),
         ).backlash = "0 mm"
+        obj.addProperty(
+            "App::PropertyFloatConstraint",
+            "pressure_angle",
+            "accuracy",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "angle the involute flanks press at, in degrees; wave teeth "
+                "have no flank angle to set and ignore it",
+            ),
+        ).pressure_angle = (20.0, 1.0, 44.0, 0.5)
         obj.addProperty(
             "App::PropertyIntegerConstraint",
             "points_per_tooth",
             "accuracy",
             QT_TRANSLATE_NOOP(
-                "App::Property", "points the outline of one tooth is drawn from"
+                "App::Property",
+                "points the outline of one wave tooth is drawn from; involute "
+                "flanks are drawn from as many points as their shape needs",
             ),
         ).points_per_tooth = (24, 4, 400, 1)
         obj.addProperty(
@@ -238,8 +319,16 @@ class NonCircularGear(BaseGear):
             (
                 "tooth_interference",
                 "App::PropertyDistance",
-                "deepest the teeth cut into one another over a revolution; "
-                "negative once backlash holds them apart",
+                "deepest wave teeth cut into one another over a revolution; "
+                "negative once backlash holds them apart. 0 for involute "
+                "teeth, which transmission_error measures instead",
+            ),
+            (
+                "transmission_error",
+                "App::PropertyFloat",
+                "worst the motion involute teeth deliver strays from f(x), in "
+                "degrees, as ncgears measures it. 0 for wave teeth, which "
+                "tooth_interference measures instead",
             ),
         ):
             obj.addProperty(
@@ -257,13 +346,14 @@ class NonCircularGear(BaseGear):
                     "{}: f(x) scaled by {:.6g} so the second gear closes into itself\n",
                 ).format(obj.Label, scale)
             )
-        driver, mate = profiles(obj, pair)
+        driver, _, penetration, error = profiles(obj, pair, scale)
         obj.solved_center_distance = distance
         obj.ratio_scale = scale
         obj.min_ratio = pair.min_ratio
         obj.max_ratio = pair.max_ratio
         obj.mate_teeth = noncircular.mate_teeth(pair, obj.num_teeth)
-        obj.tooth_interference = noncircular.interference(pair, driver, mate)
+        obj.tooth_interference = penetration
+        obj.transmission_error = error
         return make_shape(driver, obj.height.Value)
 
 
@@ -290,7 +380,7 @@ class NonCircularGearMate(BaseGear):
         master = obj.master
         if master is None:
             raise ValueError("no master gear is set")
-        pair, distance, _ = solve(master)
+        pair, distance, scale = solve(master)
 
         placement = app.Placement(
             app.Vector(distance, 0.0, 0.0),
@@ -299,7 +389,7 @@ class NonCircularGearMate(BaseGear):
         if not _same_placement(obj.Placement, placement):
             obj.Placement = placement
 
-        _, mate = profiles(master, pair)
+        mate = profiles(master, pair, scale)[1]
         return make_shape(mate, master.height.Value)
 
 
