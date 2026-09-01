@@ -34,6 +34,10 @@ QT_TRANSLATE_NOOP = app.Qt.QT_TRANSLATE_NOOP
 
 MODES = ["gear ratio", "pitch radius"]
 
+# Outline points per B-spline of the wire the gear is drawn from. Splines this
+# short are what keep the extrusion cheap to mesh; see ``outline_wire``.
+POINTS_PER_SPAN = 6
+
 
 def stamp_version(obj):
     """Own the ``version`` property BaseGear adds, which it fills with its own."""
@@ -71,11 +75,32 @@ def profiles(obj, pair):
     )
 
 
-def make_shape(points, height):
-    """A closed outline through ``points``, extruded when ``height`` is set."""
+def outline_wire(points, span=POINTS_PER_SPAN):
+    """The closed curve through ``points``, handed over as short B-splines.
+
+    One periodic spline is interpolated through the points as before, then cut
+    into pieces that each carry only their own poles. The curve is the same one
+    either way; what changes is that OCC then extrudes and meshes a row of
+    small faces rather than one large one, which it does far faster - the same
+    reason freecad.gears builds its wires from short splines. It is the 3D view
+    that pays this, on every rebuild, so it does not show up in a recompute.
+    """
     curve = part.BSplineCurve()
     curve.interpolate(Points=[fcvec(point) for point in points], PeriodicFlag=True)
-    wire = part.Wire(curve.toShape())
+    pieces = max(1, min(len(points) // span, len(points) // 2))
+    start, length = curve.FirstParameter, curve.LastParameter - curve.FirstParameter
+    cuts = [start + length * index / pieces for index in range(pieces + 1)]
+    spans = []
+    for first, last in zip(cuts, cuts[1:]):
+        piece = curve.copy()
+        piece.segment(first, last)
+        spans.append(piece.toShape())
+    return part.Wire(spans)
+
+
+def make_shape(points, height):
+    """A closed outline through ``points``, extruded when ``height`` is set."""
+    wire = outline_wire(points)
     if height <= 0.0:
         return wire
     return part.Face(wire).extrude(app.Vector(0.0, 0.0, height))

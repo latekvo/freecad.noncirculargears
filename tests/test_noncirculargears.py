@@ -442,6 +442,36 @@ def test_creation_dialog(document):
     document.removeObject(driver.Name)
 
 
+def prominences(radius):
+    """How far each local maximum of a closed series stands above its surroundings.
+
+    Each maximum is walked away from in both directions until the series rises
+    above it again, and it is credited with the deeper of the two lowest points
+    reached. Carrying on to a higher maximum rather than stopping at the first
+    dip is what makes this immune to a lone spurious extremum beside a real
+    one: a sampling that lands on the seam of the wire leaves exactly that, and
+    reading the dip next door would report a whole tooth as flat.
+    """
+    count = len(radius)
+    peaks = np.flatnonzero(
+        (radius > np.roll(radius, 1)) & (radius >= np.roll(radius, -1))
+    )
+    found = []
+    for peak in peaks:
+        cols = []
+        for step in (1, -1):
+            lowest = radius[peak]
+            index = peak
+            for _ in range(count):
+                index = (index + step) % count
+                if radius[index] > radius[peak]:
+                    break
+                lowest = min(lowest, radius[index])
+            cols.append(lowest)
+        found.append(radius[peak] - max(cols))
+    return np.array(found)
+
+
 def count_teeth(gear, tooth, samples=6400):
     """Teeth on the built shape, counted as maxima of its outline's radius.
 
@@ -449,21 +479,15 @@ def count_teeth(gear, tooth, samples=6400):
     with the wrong tooth count cannot pass. The default is sixteen points per
     tooth at the most teeth the workbench allows.
 
-    A maximum has to stand a tenth of ``tooth`` above the outline either side of
-    it to count: the spline through a gear built in periods puts a maximum of a
-    few times 1e-15 mm at each join between them, which is a tooth to nobody.
+    A maximum has to stand a tenth of ``tooth`` above its surroundings to
+    count, which is what separates a tooth from the extremum a sampling leaves
+    where the outline's splines meet.
     """
     outline = min(gear.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
     center = gear.Placement.Base
     points = outline.discretize(Number=samples)
     radius = np.array([(point - center).Length for point in points])
-    rising = radius > np.roll(radius, 1)
-    peaks = np.flatnonzero(rising & (radius >= np.roll(radius, -1)))
-    valleys = np.flatnonzero(~rising & (radius <= np.roll(radius, -1)))
-    after = np.searchsorted(valleys, peaks)
-    # index -1 and index len are the valleys the closed outline wraps around to
-    shoulder = np.maximum(radius[valleys[after - 1]], radius[valleys[after % len(valleys)]])
-    return int(np.sum(radius[peaks] - shoulder > 0.1 * tooth))
+    return int(np.sum(prominences(radius) > 0.1 * tooth))
 
 
 def main():
