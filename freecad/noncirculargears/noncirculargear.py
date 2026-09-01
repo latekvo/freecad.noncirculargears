@@ -23,6 +23,8 @@
 placing itself on the line of centres in the position the two are drawn for.
 """
 
+import collections
+
 from freecad import app
 from freecad import part
 from freecad.gears.basegear import BaseGear, fcvec
@@ -39,6 +41,11 @@ STYLES = ["wave", "involute"]
 # Outline points per B-spline of the wire the gear is drawn from. Splines this
 # short are what keep the extrusion cheap to mesh; see ``outline_wire``.
 POINTS_PER_SPAN = 6
+
+# Outlines already cut, oldest first, against the parameters they were cut
+# from; see ``profiles``. Enough for both styles of a pair, and a few edits back.
+CUTS_KEPT = 8
+CUTS = collections.OrderedDict()
 
 
 def stamp_version(obj):
@@ -66,17 +73,34 @@ def solve(obj):
     return pair, obj.center_distance.Value, scale
 
 
+def cut_style(obj):
+    """The teeth to cut for ``obj`` now.
+
+    Wave while a dialog is still setting the pair up, whatever style is asked
+    for. An involute cut costs seconds, and it is worth paying once the pair is
+    settled rather than again on every parameter touched on the way there.
+    """
+    if getattr(obj.Proxy, "preview", False):
+        return "wave"
+    return obj.tooth_style
+
+
 def profiles(obj, pair, scale):
     """Both gears' outlines for the parameters on ``obj``.
 
-    Kept on the gear until one of the parameters it was cut from changes.
     Both halves of a pair are drawn from the driving gear's outlines and
     FreeCAD recomputes the two objects separately, so without this an involute
     pair - which takes seconds to cut, not milliseconds - would be cut twice
-    over for every rebuild.
+    over for every rebuild. Several are kept rather than one, which is what
+    lets a style be gone back to, or an edit undone, for nothing.
+
+    A cut that would not cut is kept along with the ones that did, because a
+    recompute swallows the reason and the dialog has to ask a second time to
+    have it; the second ask is the same refusal, and is not worth seconds.
     """
+    style = cut_style(obj)
     key = (
-        obj.tooth_style,
+        style,
         obj.mode,
         obj.function,
         obj.center_distance.Value,
@@ -89,15 +113,25 @@ def profiles(obj, pair, scale):
         obj.backlash.Value,
         obj.pressure_angle,
     )
-    cached = getattr(obj.Proxy, "_profiles", None)
-    if cached is not None and cached[0] == key:
-        return cached[1]
-    cut = _cut_profiles(obj, pair, scale)
-    obj.Proxy._profiles = (key, cut)
+    if key in CUTS:
+        CUTS.move_to_end(key)
+    else:
+        try:
+            CUTS[key] = _cut_profiles(obj, pair, scale, style)
+        except involute.InvoluteUnavailable:
+            # Not decided by the parameters: installing ncgears must lift it.
+            raise
+        except Exception as refusal:
+            CUTS[key] = refusal
+        while len(CUTS) > CUTS_KEPT:
+            CUTS.popitem(last=False)
+    cut = CUTS[key]
+    if isinstance(cut, Exception):
+        raise cut
     return cut
 
 
-def _cut_profiles(obj, pair, scale):
+def _cut_profiles(obj, pair, scale, style):
     """The two outlines and how far the pair strays from f(x), as each style measures it.
 
     Each style is measured its own way, because neither measure fits the other
@@ -107,7 +141,7 @@ def _cut_profiles(obj, pair, scale):
     as a radius against an angle and so needs one a flank with a fillet under
     it does not give.
     """
-    if obj.tooth_style == "involute":
+    if style == "involute":
         drive, mate, error = involute.outlines(
             pair,
             obj.function,

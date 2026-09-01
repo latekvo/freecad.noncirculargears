@@ -139,7 +139,11 @@ flanks that are conjugate on the pitch line rather than laid over it, and the
 pair comes back to be placed rather than approximated: 2.4e-7 degrees of
 `transmission_error` for the default pair against 0.012 mm of interference for
 the wave. It takes five to fifteen seconds a pair rather than a tenth of a
-second, wants an `f(x)` SymPy can read, and needs `ncgears` installed. The two
+second, wants an `f(x)` SymPy can read, and needs `ncgears` installed. Because
+a cut is that dear, the setup dialog shows every change with wave teeth and
+cuts the chosen flanks when you press OK: a pair costs one cut rather than one
+for each of the dozen parameters that lead to it, and outlines already cut are
+kept, so going back to a style is free. The two
 measures do not overlap - each reads 0 for the other's teeth - and
 [docs/involute-teeth.md](docs/involute-teeth.md) says why, along with what the
 mapping onto ncgears is and where it refuses.
@@ -148,18 +152,19 @@ mapping onto ncgears is and where it refuses.
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and nineteen checks: both gears build as valid solids, the pitch points
-meet on the line of centres, the delivered ratio is the one asked for, the teeth
-clear each other and are counted off the built shapes, both modes solve, four
-pairs that turn at something other than 1:1 come out turning what they were
-asked to, an `f(x)` that goes negative, does not parse, is not finite, reaches
-outside the `math` module or does not repeat as often as the turns need is
-refused rather than drawn, and the dialog is built and typed into rather than
-described.
+A hundred and thirty-three checks: both gears build as valid solids, the pitch
+points meet on the line of centres, the delivered ratio is the one asked for,
+the teeth clear each other and are counted off the built shapes, both modes
+solve, four pairs that turn at something other than 1:1 come out turning what
+they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
+reaches outside the `math` module or does not repeat as often as the turns need
+is refused rather than drawn, the dialog is built and typed into rather than
+described, and an involute pair is counted as it is set up to show that it is
+cut once, on OK, rather than once per parameter.
 
-Thirty-six of those are involute teeth. Thirty-three need ncgears and are
-skipped with a note without it, leaving eighty-six that run either way - the
-other three are the ones that check what is said when it is missing. To run
+Fifty of those are involute teeth. Forty-six need ncgears and are skipped with
+a note without it, leaving eighty-seven that run either way - the other four
+are the ones that check what is said when it is missing. To run
 the lot against an ncgears kept out of FreeCAD's own environment, put it on
 the path for the run:
 

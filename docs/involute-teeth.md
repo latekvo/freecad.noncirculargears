@@ -88,10 +88,24 @@ write. Everything crossing the boundary is a plain float.
 
 ## What it costs
 
-- **Five to fifteen seconds a pair**, against a tenth of a second for the wave.
-  `samples_per_radian` barely moves it; the flank construction is the cost. This
-  is why `profiles` is cached on the gear: without it a rebuild cuts the pair
-  twice, once for each half.
+- **Five to fifteen seconds a pair**, against a tenth of a second for the wave,
+  and there is no setting that buys it back. The cost is ncgears' own flank
+  construction and the overlap sweep that verifies it, which between them are
+  about nine tenths of the call. `samples` is already at the 1024 ncgears
+  refuses to go below, and lowering `samples_per_radian` from its default makes
+  the call *slower* - 12 s becomes 21 s at 60 and 30 s at 20 - while moving the
+  outline by a tenth of a micron, because the coarser sampling costs the
+  root-finders more than it saves. ncgears already threads the two gears, which
+  wins a measured 1.57x of the four cores available; the ~31 s of CPU underneath
+  that is what it is.
+
+  So the cost is spent less often rather than made smaller. `profiles` keeps the
+  last eight cuts against the parameters they were cut from, which is what stops
+  a rebuild cutting the pair twice over - once for each half - and lets a style
+  be gone back to for nothing. A refusal is kept the same way, because finding
+  out why a recompute would not build means asking a second time. On top of
+  that the setup dialog previews with wave teeth and cuts on OK, which took a
+  four-parameter involute setup from 20.2 s to 4.2 s for the same geometry.
 - **shapely and ezdxf**, which FreeCAD does not ship. It does ship numpy, scipy
   and sympy, which ncgears also wants.
 - **An f(x) SymPy can read and differentiate.** `min`, `max` and friends do not
