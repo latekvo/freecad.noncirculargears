@@ -10,6 +10,12 @@ on a 1.07 mm tooth for the default pair, which `tooth_interference` measures and
 [ncgears](https://github.com/kylebme/ncgears). This is the note that found it,
 kept up to date with what it turned out to cost.
 
+The same pair, sixteen teeth, drawn both ways:
+
+![the default pair with wave teeth](teeth-wave.png)
+
+![the same pair with involute teeth](teeth-involute.png)
+
 ## The involute does not port from freecad.gears
 
 `pygears.involute_tooth.InvoluteTooth` builds a flank from the base circle:

@@ -132,6 +132,8 @@ whole revolution, and `backlash` clears it: for the default pair, 0.012 mm of
 interference on a 1.07 mm tooth, and `backlash = 0.1 mm` takes it to -0.079 mm.
 Raising `num_teeth` lowers it too.
 
+![sixteen teeth cut as involute flanks](docs/teeth-involute.png)
+
 **`tooth_style = involute` needs none of that, and costs seconds.** ncgears cuts
 flanks that are conjugate on the pitch line rather than laid over it, and the
 pair comes back to be placed rather than approximated: 2.4e-7 degrees of
