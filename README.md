@@ -33,9 +33,9 @@ Link or copy this directory into FreeCAD's user `Mod` directory, beside
 Then pick **Non-Circular Gear** from the workbench list and use **Non-Circular
 Gear > Gear Pair**.
 
-Involute teeth are cut by [ncgears](https://github.com/kylebme/ncgears), which
-is optional: without it the wave teeth are exactly what they were, and asking
-for involute ones says what to install.
+Involute teeth are cut by [ncgears](https://github.com/kylebme/ncgears) and are
+what a new pair starts on. It is still optional: without it a pair starts on
+wave teeth instead, and asking for involute ones says what to install.
 
     pip install ncgears
 
@@ -59,7 +59,7 @@ back out, and the property editor reaches the same properties afterwards.
 | `num_teeth` | teeth on the driving gear |
 | `mate_turns`, `driver_turns` | turns each gear makes against the other |
 | `height` | extrusion height; `0` leaves the bare outline |
-| `tooth_style` | a wave laid on the pitch line, or conjugate involute flanks |
+| `tooth_style` | conjugate involute flanks, the default, or a wave laid on the pitch line |
 | `tooth_height` | tooth height above the pitch line, as a fraction of the circular pitch |
 | `pressure_angle` | angle the involute flanks press at; wave teeth have none |
 | `backlash` | gap held open between the two tooth surfaces |
@@ -124,9 +124,10 @@ kept exactly and the centre distance moves instead.
 
 **Wave teeth are approximate; the rolling is not.** The pitch lines roll on each
 other exactly - the contact stays on the line of centres and the delivered
-ratio is the `f(x)` you asked for to a few parts in 10^5. The default teeth are
-a sine wave laid along the arc length of each pitch line in antiphase, not
-conjugate flanks, so a tooth passes about a hundredth of its own height into
+ratio is the `f(x)` you asked for to a few parts in 10^5. `tooth_style = wave`
+lays a sine wave along the arc length of each pitch line in antiphase, rather
+than cutting conjugate flanks, so a tooth passes about a hundredth of its own
+height into
 the gap it meshes with. `tooth_interference` measures exactly that, over a
 whole revolution, and `backlash` clears it: for the default pair, 0.012 mm of
 interference on a 1.07 mm tooth, and `backlash = 0.1 mm` takes it to -0.079 mm.
@@ -138,13 +139,12 @@ Raising `num_teeth` lowers it too.
 flanks that are conjugate on the pitch line rather than laid over it, and the
 pair comes back to be placed rather than approximated: 2.4e-7 degrees of
 `transmission_error` for the default pair against 0.012 mm of interference for
-the wave. It takes five to fifteen seconds a pair rather than a tenth of a
-second, wants an `f(x)` SymPy can read, and needs `ncgears` installed. Because
-a cut is that dear, the setup dialog shows every change with wave teeth and
-cuts the chosen flanks when you press OK: a pair costs one cut rather than one
-for each of the dozen parameters that lead to it, and outlines already cut are
-kept, so going back to a style is free. The two
-measures do not overlap - each reads 0 for the other's teeth - and
+the wave. It is what a new pair starts on, falling back to `wave` only where
+ncgears is not installed. It takes five to fifteen seconds a pair rather than a
+tenth of a second, and wants an `f(x)` SymPy can read; outlines already cut are
+kept, so a rebuild that does not change them - the second gear, a style gone
+back to, an edit undone - costs nothing. The two measures do not overlap - each
+reads 0 for the other's teeth - and
 [docs/involute-teeth.md](docs/involute-teeth.md) says why, along with what the
 mapping onto ncgears is and where it refuses.
 
@@ -152,21 +152,27 @@ mapping onto ncgears is and where it refuses.
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and thirty-three checks: both gears build as valid solids, the pitch
+A hundred and twenty-eight checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, both modes
 solve, four pairs that turn at something other than 1:1 come out turning what
 they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
 reaches outside the `math` module or does not repeat as often as the turns need
 is refused rather than drawn, the dialog is built and typed into rather than
-described, and an involute pair is counted as it is set up to show that it is
-cut once, on OK, rather than once per parameter.
+described, a new pair comes up on involute teeth where ncgears is installed and
+on wave teeth where it is not, and an involute pair is counted as it is rebuilt
+to show that one cut serves both gears and is not paid for twice.
 
-Fifty of those are involute teeth. Forty-six need ncgears and are skipped with
-a note without it, leaving eighty-seven that run either way - the other four
-are the ones that check what is said when it is missing. To run
-the lot against an ncgears kept out of FreeCAD's own environment, put it on
-the path for the run:
+A run holds itself to 40% of the cores - `CPU_SHARE` at the top of the file -
+because ncgears otherwise spreads every cut over the whole machine, which took
+a run to 85% of it and left nothing to work on. That is why the checks take
+longer than the sum of what they measure.
+
+Forty-five of those are involute teeth. Forty need ncgears and are skipped with
+a note without it, leaving eighty-eight that run either way - the other five
+are the ones that check what is done and said when it is missing. To run the lot against
+an ncgears kept out of FreeCAD's own environment, put it on the path for the
+run:
 
     freecadcmd -P path/to/site-packages tests/test_noncirculargears.py
 

@@ -73,18 +73,6 @@ def solve(obj):
     return pair, obj.center_distance.Value, scale
 
 
-def cut_style(obj):
-    """The teeth to cut for ``obj`` now.
-
-    Wave while a dialog is still setting the pair up, whatever style is asked
-    for. An involute cut costs seconds, and it is worth paying once the pair is
-    settled rather than again on every parameter touched on the way there.
-    """
-    if getattr(obj.Proxy, "preview", False):
-        return "wave"
-    return obj.tooth_style
-
-
 def profiles(obj, pair, scale):
     """Both gears' outlines for the parameters on ``obj``.
 
@@ -98,9 +86,8 @@ def profiles(obj, pair, scale):
     recompute swallows the reason and the dialog has to ask a second time to
     have it; the second ask is the same refusal, and is not worth seconds.
     """
-    style = cut_style(obj)
     key = (
-        style,
+        obj.tooth_style,
         obj.mode,
         obj.function,
         obj.center_distance.Value,
@@ -117,7 +104,7 @@ def profiles(obj, pair, scale):
         CUTS.move_to_end(key)
     else:
         try:
-            CUTS[key] = _cut_profiles(obj, pair, scale, style)
+            CUTS[key] = _cut_profiles(obj, pair, scale)
         except involute.InvoluteUnavailable:
             # Not decided by the parameters: installing ncgears must lift it.
             raise
@@ -131,7 +118,7 @@ def profiles(obj, pair, scale):
     return cut
 
 
-def _cut_profiles(obj, pair, scale, style):
+def _cut_profiles(obj, pair, scale):
     """The two outlines and how far the pair strays from f(x), as each style measures it.
 
     Each style is measured its own way, because neither measure fits the other
@@ -141,7 +128,7 @@ def _cut_profiles(obj, pair, scale, style):
     as a radius against an angle and so needs one a flank with a fillet under
     it does not give.
     """
-    if style == "involute":
+    if obj.tooth_style == "involute":
         drive, mate, error = involute.outlines(
             pair,
             obj.function,
@@ -221,6 +208,9 @@ class NonCircularGear(BaseGear):
             ),
         )
         obj.tooth_style = STYLES
+        # Involute unless it cannot be cut here: a new gear that starts by
+        # refusing to build is no way to meet someone without ncgears.
+        obj.tooth_style = "involute" if involute.available() else "wave"
         obj.addProperty(
             "App::PropertyString",
             "function",

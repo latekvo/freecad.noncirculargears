@@ -1,14 +1,15 @@
 # Involute teeth
 
-The teeth this workbench draws by default are a sine wave laid along each pitch
-line's arc length in antiphase. The pitch lines roll exactly; the flanks are not
-conjugate, so a tooth passes a little way into the gap it meshes with - 0.012 mm
-on a 1.07 mm tooth for the default pair, which `tooth_interference` measures and
-`backlash` clears.
+`tooth_style = wave` lays a sine wave along each pitch line's arc length in
+antiphase. The pitch lines roll exactly; the flanks are not conjugate, so a
+tooth passes a little way into the gap it meshes with - 0.012 mm on a 1.07 mm
+tooth for the default pair, which `tooth_interference` measures and `backlash`
+clears.
 
-`tooth_style = involute` replaces them with flanks that are conjugate, cut by
-[ncgears](https://github.com/kylebme/ncgears). This is the note that found it,
-kept up to date with what it turned out to cost.
+`tooth_style = involute` cuts flanks that are conjugate instead, by
+[ncgears](https://github.com/kylebme/ncgears), and is what a pair starts on
+where ncgears is installed. This is the note that found it, kept up to date
+with what it turned out to cost.
 
 The same pair, sixteen teeth, drawn both ways:
 
@@ -103,9 +104,7 @@ write. Everything crossing the boundary is a plain float.
   last eight cuts against the parameters they were cut from, which is what stops
   a rebuild cutting the pair twice over - once for each half - and lets a style
   be gone back to for nothing. A refusal is kept the same way, because finding
-  out why a recompute would not build means asking a second time. On top of
-  that the setup dialog previews with wave teeth and cuts on OK, which took a
-  four-parameter involute setup from 20.2 s to 4.2 s for the same geometry.
+  out why a recompute would not build means asking a second time.
 - **shapely and ezdxf**, which FreeCAD does not ship. It does ship numpy, scipy
   and sympy, which ncgears also wants.
 - **An f(x) SymPy can read and differentiate.** `min`, `max` and friends do not

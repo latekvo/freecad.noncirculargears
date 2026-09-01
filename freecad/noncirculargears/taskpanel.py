@@ -27,7 +27,7 @@ transaction, which is what lets every change show up in the 3D view as it is
 made and still leave nothing behind if the dialog is cancelled.
 """
 
-from PySide import QtCore, QtWidgets
+from PySide import QtWidgets
 
 from freecad import app
 
@@ -175,17 +175,11 @@ class GearPairPanel(object):
 
     Accepting keeps it and cancelling undoes the whole of it, the pair included,
     by committing or aborting the transaction the command opened.
-
-    Every change is shown with wave teeth, whichever style is chosen, and the
-    chosen style is cut when the dialog is accepted. Involute flanks take
-    seconds rather than milliseconds to cut, which is bearable once but not on
-    each of the dozen parameters that lead up to it.
     """
 
     def __init__(self, driver, mate):
         self.driver = driver
         self.mate = mate
-        driver.Proxy.preview = True
         self.form = QtWidgets.QWidget()
         self.form.setWindowTitle(
             app.Qt.translate("NonCircularGear_Pair", "Non-Circular Gear Pair")
@@ -211,18 +205,9 @@ class GearPairPanel(object):
         except (ValueError, TypeError) as err:
             self.status.setText(str(err))
         else:
-            self.status.setText(self.rebuild() or self.pending())
+            self.status.setText(self.rebuild())
         for row in self.rows:
             row.show(getattr(self.driver, row.name))
-
-    def pending(self):
-        """What is still to be cut, when the view is not showing it yet."""
-        if self.driver.tooth_style == "wave":
-            return ""
-        return app.Qt.translate(
-            "NonCircularGear_Pair",
-            "showing wave teeth; the {} flanks are cut when you press OK",
-        ).format(self.driver.tooth_style)
 
     def rebuild(self):
         """Recompute the pair, and say why if it would not build."""
@@ -236,31 +221,7 @@ class GearPairPanel(object):
         return app.Qt.translate("NonCircularGear_Pair", "the pair could not be built")
 
     def accept(self):
-        """Cut the teeth that were only previewed, and keep the pair if they cut.
-
-        A style that will not cut leaves the dialog open holding the reason,
-        back on the preview it was showing before, rather than closing over a
-        pair that was never built.
-        """
         self.apply()
-        self.driver.Proxy.preview = False
-        self.driver.touch()
-        self.mate.touch()
-        self.status.setText(
-            app.Qt.translate("NonCircularGear_Pair", "cutting the teeth...")
-        )
-        # Cutting holds the event loop, so paint the label before it starts.
-        self.status.repaint()
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-        try:
-            failure = self.rebuild()
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-        if failure:
-            self.driver.Proxy.preview = True
-            self.apply()
-            self.status.setText(failure)
-            return False
         self.driver.Document.commitTransaction()
         return True
 

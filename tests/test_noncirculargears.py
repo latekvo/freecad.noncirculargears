@@ -15,6 +15,26 @@ import os
 import sys
 import traceback
 
+# A run is not worth taking the machine over for, so it is held to a share of
+# the cores. Three things thread underneath and only one of them can be asked
+# politely - ncgears takes the core count as its own, the numeric stack reads
+# the environment when it is imported, and OCC meshes on a pool with no knob
+# on it at all - so the share is pinned rather than requested, and the other
+# two are told the same number only to stop them oversubscribing what is left.
+CPU_SHARE = 0.4
+WORKERS = max(1, int((os.cpu_count() or 1) * CPU_SHARE))
+for _limit in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ[_limit] = str(WORKERS)
+
+if hasattr(os, "sched_setaffinity"):
+    os.sched_setaffinity(0, set(sorted(os.sched_getaffinity(0))[:WORKERS]))
+
 # Redirected to a file, print would otherwise hold a whole run's results in a
 # buffer, and a crash in OCC takes the lot with it rather than the line before.
 sys.stdout.reconfigure(line_buffering=True)
@@ -31,6 +51,22 @@ from freecad.noncirculargears.commands import CreateNonCircularGearPair
 from freecad.noncirculargears.noncirculargear import solve
 from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
 
+def hold_ncgears_to(workers):
+    """Keep an involute cut inside ``workers`` threads.
+
+    ncgears takes the machine's core count as its own and offers no way to say
+    otherwise, so the count it reads is what has to be set. Left alone it puts
+    a run of these checks at 85% of the machine.
+    """
+    try:
+        from ncgears import engine
+    except ImportError:
+        return
+    engine._MAX_GEOMETRY_WORKERS = workers
+
+
+hold_ncgears_to(WORKERS)
+
 FAILURES = []
 
 
@@ -42,6 +78,13 @@ def check(name, condition, detail=""):
 
 
 def make_pair(document, **overrides):
+    """A pair with wave teeth unless asked otherwise.
+
+    Most of these checks are about the pitch lines and the wave laid on them,
+    and an involute cut costs seconds each, so the style a new gear really
+    starts on is checked once rather than paid for throughout.
+    """
+    overrides.setdefault("tooth_style", "wave")
     driver, mate = CreateNonCircularGearPair.create()
     for key, value in overrides.items():
         setattr(driver, key, value)
@@ -432,6 +475,19 @@ def test_involute_says_what_is_missing(document):
         else:
             named = False
         check("the message names the package to install", named)
+        fallen_back, spare = CreateNonCircularGearPair.create()
+        # Parameters of its own, so that building is this pair being drawn and
+        # not an outline cut earlier, while ncgears was there, being handed back.
+        fallen_back.function = "1 + 0.29 * cos(x)"
+        document.recompute()
+        check(
+            "a new pair falls back to wave teeth rather than to a refusal",
+            fallen_back.tooth_style == "wave" and fallen_back.Shape.isValid(),
+            "%s, %s" % (fallen_back.tooth_style, fallen_back.State),
+        )
+        document.removeObject(spare.Name)
+        document.removeObject(fallen_back.Name)
+
         # Parameters of its own, so what follows cuts this pair rather than
         # handing back one cut earlier.
         refused, mate = make_pair(
@@ -531,6 +587,9 @@ def test_creation_dialog(document):
 
     document.openTransaction("dialog")
     driver, mate = CreateNonCircularGearPair.create()
+    # Wave teeth: what is checked here is the dialog, and cutting involute
+    # flanks for each value typed into it would be seconds a row.
+    driver.tooth_style = "wave"
     document.recompute()
     panel = GearPairPanel(driver, mate)
     rows = dict((row.name, row) for row in panel.rows)
@@ -602,6 +661,9 @@ def test_creation_dialog(document):
     document.UndoMode = 1
     document.openTransaction("dialog")
     driver, mate = CreateNonCircularGearPair.create()
+    # Wave teeth: what is checked here is the dialog, and cutting involute
+    # flanks for each value typed into it would be seconds a row.
+    driver.tooth_style = "wave"
     document.recompute()
     names = [driver.Name, mate.Name]
     GearPairPanel(driver, mate).reject()
@@ -622,6 +684,9 @@ def test_creation_dialog(document):
 
     document.openTransaction("dialog")
     driver, mate = CreateNonCircularGearPair.create()
+    # Wave teeth: what is checked here is the dialog, and cutting involute
+    # flanks for each value typed into it would be seconds a row.
+    driver.tooth_style = "wave"
     document.recompute()
     panel = GearPairPanel(driver, mate)
     check("accepting the dialog closes it", panel.accept() is True)
@@ -702,76 +767,34 @@ def counting_cuts():
 
 
 def test_involute_is_cut_once(document):
-    """An involute pair is cut when the dialog is accepted, and only then.
+    """An involute outline is cut once, however many times it is asked for.
 
-    A cut takes seconds, so what the dialog does with the dozen parameters
-    ahead of it decides whether the style is usable at all: every one of them
-    is previewed with wave teeth, and the flanks are cut once, on OK. Cuts
-    already paid for are kept, so a style gone back to is not cut twice.
+    A cut takes seconds, so a pair rebuilt - by its second gear, by a style
+    gone back to - must not pay again for one it already has. A refusal is
+    kept the same way: a pair too slow to cut is too slow to refuse twice.
     """
     if not involute.available():
-        print("--   involute dialog checks skipped: ncgears is not installed")
+        print("--   involute cut checks skipped: ncgears is not installed")
         return
 
-    qt_running()
     cuts, counted, original = counting_cuts()
     involute.outlines = counted
     try:
-        document.openTransaction("cut once")
-        driver, mate = CreateNonCircularGearPair.create()
-        document.recompute()
-        panel = GearPairPanel(driver, mate)
-        rows = dict((row.name, row) for row in panel.rows)
-
-        rows["tooth_style"].widget.setCurrentText("involute")
-        rows["num_teeth"].widget.setValue(12)
-        panel.apply()
-        rows["tooth_height"].widget.setValue(0.4)
-        panel.apply()
-
-        check(
-            "setting up an involute pair does not cut it",
-            len(cuts) == 0,
-            "%d cut(s) while three parameters were set" % len(cuts),
+        # Parameters of its own, so this is a cut rather than one handed back.
+        driver, mate = make_pair(
+            document, tooth_style="involute", function="1 + 0.31 * cos(x)"
         )
         check(
-            "the dialog goes on showing the style that was asked for",
-            driver.tooth_style == "involute"
-            and rows["tooth_style"].read() == "involute",
-            "%s on the gear, %s in the dialog"
-            % (driver.tooth_style, rows["tooth_style"].read()),
-        )
-        check(
-            "the dialog says the flanks are still to be cut",
-            "involute" in panel.status.text() and "OK" in panel.status.text(),
-            repr(panel.status.text()),
-        )
-        check(
-            "what is previewed is the wave teeth, which are cut in full",
-            driver.Shape.ShapeType == "Solid"
-            and driver.Shape.isValid()
-            and driver.tooth_interference.Value > 0.0,
-            "%s, interference %.4f mm"
-            % (driver.Shape.ShapeType, driver.tooth_interference.Value),
-        )
-
-        check("accepting the dialog closes it", panel.accept() is True)
-        check(
-            "accepting cuts the flanks, once",
+            "a pair is cut once, not once for each of the two gears drawn from it",
             len(cuts) == 1,
             "%d cut(s)" % len(cuts),
         )
         check(
-            "the pair that is kept is the involute one",
-            driver.Shape.isValid()
-            and mate.Shape.isValid()
-            and driver.transmission_error > 0.0
-            and driver.tooth_interference.Value == 0.0,
-            "error %.3g deg, interference %.4g mm"
-            % (driver.transmission_error, driver.tooth_interference.Value),
+            "both gears are built from that one cut",
+            driver.Shape.isValid() and mate.Shape.isValid(),
+            "%s and %s" % (driver.Shape.ShapeType, mate.Shape.ShapeType),
         )
 
-        # Back to wave and forward again, over outlines cut a moment ago.
         driver.tooth_style = "wave"
         document.recompute()
         driver.tooth_style = "involute"
@@ -782,64 +805,44 @@ def test_involute_is_cut_once(document):
             "%d cut(s) after going back to wave and forward again" % len(cuts),
         )
 
-        document.removeObject(mate.Name)
-        document.removeObject(driver.Name)
+        # A tooth of no height has no flank to cut, so involute refuses it.
+        driver.tooth_height = 0.0
+        document.recompute()
+        check(
+            "a refusal is arrived at once, not once per gear that asks",
+            len(cuts) == 2,
+            "%d cut(s), so %d attempt(s) at the refusal" % (len(cuts), len(cuts) - 1),
+        )
     finally:
         involute.outlines = original
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
 
 
-def test_involute_refusal_keeps_the_dialog_open(document):
-    """A style that will not cut leaves the dialog open, saying why.
+def test_new_pairs_are_involute(document):
+    """A new pair starts on involute teeth, which is what a pair is worth having.
 
-    The cut is put off until the dialog is accepted, so this is the one moment
-    a failure can arrive: it has to be shown rather than closed over, and the
-    preview it interrupted has to come back. Finding out why a recompute would
-    not build means asking for the cut a second time, which is why a refusal is
-    kept the way a cut outline is - a pair too slow to cut is too slow to
-    refuse twice.
+    What it starts on without ncgears is checked where the rest of that is.
     """
     if not involute.available():
-        print("--   involute refusal check skipped: ncgears is not installed")
+        print("--   involute default check skipped: ncgears is not installed")
         return
 
-    qt_running()
-    cuts, counted, original = counting_cuts()
-    involute.outlines = counted
-    document.openTransaction("refusal")
     driver, mate = CreateNonCircularGearPair.create()
     document.recompute()
-    panel = GearPairPanel(driver, mate)
-    rows = dict((row.name, row) for row in panel.rows)
-
-    rows["tooth_style"].widget.setCurrentText("involute")
-    # A tooth of no height has no flank to cut: involute refuses it and wave
-    # builds it, which an unreadable f(x) would not separate.
-    rows["tooth_height"].widget.setValue(0.0)
-    panel.apply()
-
     check(
-        "a style that will not cut keeps the dialog open",
-        panel.accept() is False,
-        repr(panel.status.text()),
+        "a new pair starts on involute teeth",
+        driver.tooth_style == "involute",
+        driver.tooth_style,
     )
     check(
-        "it says what it could not do",
-        "tooth_height" in panel.status.text(),
-        repr(panel.status.text()),
+        "and builds on them without being asked twice",
+        driver.Shape.isValid() and mate.Shape.isValid()
+        and driver.transmission_error > 0.0,
+        "%s, error %.3g deg" % (driver.Shape.ShapeType, driver.transmission_error),
     )
-    check(
-        "the pair is left standing on the preview it was showing",
-        driver.Shape.ShapeType == "Solid" and driver.Shape.isValid(),
-        driver.Shape.ShapeType,
-    )
-    check(
-        "a refusal is arrived at once, not once per gear that asks",
-        len(cuts) == 1,
-        "%d attempt(s) to cut" % len(cuts),
-    )
-
-    panel.reject()
-    involute.outlines = original
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
 
 
 def main():
@@ -857,7 +860,7 @@ def main():
     test_involute_says_what_is_missing(document)
     test_creation_dialog(document)
     test_involute_is_cut_once(document)
-    test_involute_refusal_keeps_the_dialog_open(document)
+    test_new_pairs_are_involute(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))
