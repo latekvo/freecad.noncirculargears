@@ -78,12 +78,12 @@ def profiles(obj, pair):
 def outline_wire(points, span=POINTS_PER_SPAN):
     """The closed curve through ``points``, handed over as short B-splines.
 
-    One periodic spline is interpolated through the points as before, then cut
-    into pieces that each carry only their own poles. The curve is the same one
-    either way; what changes is that OCC then extrudes and meshes a row of
-    small faces rather than one large one, which it does far faster - the same
-    reason freecad.gears builds its wires from short splines. It is the 3D view
-    that pays this, on every rebuild, so it does not show up in a recompute.
+    One periodic spline is interpolated through the points and then cut into
+    pieces that each carry only their own poles, which leaves the curve itself
+    untouched. What it buys is that OCC extrudes and meshes a row of small
+    faces rather than one large one, and it is far faster at that - the same
+    reason freecad.gears builds its wires from short splines. The 3D view pays
+    this on every rebuild, so none of it shows up in a recompute.
     """
     curve = part.BSplineCurve()
     curve.interpolate(Points=[fcvec(point) for point in points], PeriodicFlag=True)
