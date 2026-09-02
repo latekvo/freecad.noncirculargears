@@ -46,7 +46,7 @@ import FreeCAD as App
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide import QtWidgets  # noqa: E402, after the platform is chosen
 
-from freecad.noncirculargears import involute, noncircular
+from freecad.noncirculargears import dependencies, involute, noncircular
 from freecad.noncirculargears.commands import CreateNonCircularGearPair
 from freecad.noncirculargears.noncirculargear import solve
 from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
@@ -812,6 +812,38 @@ def test_involute_is_cut_once(document):
     document.removeObject(driver.Name)
 
 
+def test_what_is_fetched_is_what_is_absent(document):
+    """The workbench only goes looking for packages that are not already here.
+
+    Fetching them is the GUI's business and is not done from a script, so what
+    a run can check is the reading the fetching is decided on - which is also
+    the reading that must not be fooled by ncgears being blocked, since that is
+    how the rest of these checks stand in for it not being installed.
+    """
+    try:
+        import ncgears  # noqa: F401, imported to find out whether it is there
+        importable = True
+    except ImportError:
+        importable = False
+    check(
+        "nothing is reported absent when ncgears is importable",
+        dependencies.missing() == ([] if importable else ["ncgears"]),
+        "%s, importable %s" % (dependencies.missing(), importable),
+    )
+
+    blocked = dict(sys.modules)
+    sys.modules["ncgears"] = None
+    try:
+        check(
+            "ncgears is reported absent when it cannot be imported",
+            dependencies.missing() == ["ncgears"],
+            str(dependencies.missing()),
+        )
+    finally:
+        sys.modules.clear()
+        sys.modules.update(blocked)
+
+
 def test_new_pairs_are_involute(document):
     """A new pair starts on involute teeth, which is what a pair is worth having."""
     driver, mate = CreateNonCircularGearPair.create()
@@ -852,6 +884,7 @@ def main():
     test_creation_dialog(document)
     test_involute_is_cut_once(document)
     test_new_pairs_are_involute(document)
+    test_what_is_fetched_is_what_is_absent(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))

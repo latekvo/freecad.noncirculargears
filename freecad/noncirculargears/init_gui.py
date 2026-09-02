@@ -48,7 +48,11 @@ class NonCircularGearWorkbench(gui.Workbench):
         gui.addCommand("NonCircularGear_Pair", CreateNonCircularGearPair())
 
     def Activated(self):
-        pass
+        # The first time it is opened is the moment to find out that involute
+        # teeth cannot be cut, rather than partway through drawing a pair.
+        from . import dependencies
+
+        dependencies.ensure()
 
     def Deactivated(self):
         pass

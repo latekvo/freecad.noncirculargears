@@ -34,16 +34,20 @@ Then pick **Non-Circular Gear** from the workbench list and use **Non-Circular
 Gear > Gear Pair**.
 
 Involute teeth are cut by [ncgears](https://github.com/kylebme/ncgears), which
-is what a new pair comes up on, so `package.xml` asks for it and installing
-through the Addon Manager brings it along. A checkout linked in by hand has to
-be told separately:
+is what a new pair comes up on, and nothing has to be done about that. The
+Addon Manager installs what `package.xml` asks for; a checkout linked in by
+hand is not installed by the Addon Manager, so the workbench fetches it the
+first time it is opened, into the same directory FreeCAD keeps an addon's
+packages in. It fetches only what is actually absent - numpy, scipy and sympy
+ship with FreeCAD, and a second copy of those on the path in front of them
+would be worse than useless - which comes to some 27 MB.
+
+If that cannot be done, the Report view says why, and a pair says the same
+rather than quietly standing a wave tooth in for an involute one, which would
+leave a pair that is not conjugate looking exactly like one that is. Wave teeth
+go on working throughout. To do it by hand:
 
     pip install ncgears
-
-Without it a pair says so and will not build until either that is done or
-`tooth_style` is set to `wave`. It refuses rather than quietly standing a wave
-tooth in for an involute one, which would leave a pair that is not conjugate
-looking exactly like one that is.
 
 ## What it makes
 
@@ -158,7 +162,7 @@ mapping onto ncgears is and where it refuses.
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and twenty-eight checks: both gears build as valid solids, the pitch
+A hundred and thirty checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, both modes
 solve, four pairs that turn at something other than 1:1 come out turning what
@@ -175,9 +179,9 @@ because ncgears otherwise spreads every cut over the whole machine, which took
 a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
-Forty-five of those are involute teeth. Thirty-nine need ncgears and are
-skipped with a note without it, leaving eighty-nine that run either way - the
-other six are the ones that check what is done and said when it is missing. To run the lot against
+Thirty-nine of them cut an involute pair and are skipped with a note where
+ncgears is not installed, leaving ninety-one that run either way - including
+the ones that check what is done and said when it is missing. To run the lot against
 an ncgears kept out of FreeCAD's own environment, put it on the path for the
 run:
 
