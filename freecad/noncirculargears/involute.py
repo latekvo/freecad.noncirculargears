@@ -67,7 +67,8 @@ def _ncgears():
     except ImportError as err:
         raise InvoluteUnavailable(
             "involute teeth are cut by ncgears, which is not installed here: "
-            "pip install ncgears ({})".format(err)
+            "pip install ncgears, or set tooth_style to wave for teeth that "
+            "need nothing beyond FreeCAD ({})".format(err)
         )
     return ncgears, PHI
 

@@ -7,9 +7,9 @@ tooth for the default pair, which `tooth_interference` measures and `backlash`
 clears.
 
 `tooth_style = involute` cuts flanks that are conjugate instead, by
-[ncgears](https://github.com/kylebme/ncgears), and is what a pair starts on
-where ncgears is installed. This is the note that found it, kept up to date
-with what it turned out to cost.
+[ncgears](https://github.com/kylebme/ncgears), and is what a pair starts on.
+This is the note that found it, kept up to date with what it turned out to
+cost.
 
 The same pair, sixteen teeth, drawn both ways:
 

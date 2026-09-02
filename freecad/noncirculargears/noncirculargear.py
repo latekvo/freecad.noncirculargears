@@ -208,9 +208,10 @@ class NonCircularGear(BaseGear):
             ),
         )
         obj.tooth_style = STYLES
-        # Involute unless it cannot be cut here: a new gear that starts by
-        # refusing to build is no way to meet someone without ncgears.
-        obj.tooth_style = "involute" if involute.available() else "wave"
+        # Involute whether or not ncgears is here to cut it. Standing a wave
+        # tooth in for one that was asked for would leave a pair that is not
+        # conjugate looking exactly like one that is; refusing says so.
+        obj.tooth_style = "involute"
         obj.addProperty(
             "App::PropertyString",
             "function",

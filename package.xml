@@ -19,6 +19,7 @@
     </workbench>
     <depend type="workbench">freecad.gears workbench</depend>
     <depend>numpy</depend>
+    <depend type="python">ncgears</depend>
   </content>
 
 </package>

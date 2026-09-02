@@ -51,6 +51,7 @@ from freecad.noncirculargears.commands import CreateNonCircularGearPair
 from freecad.noncirculargears.noncirculargear import solve
 from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
 
+
 def hold_ncgears_to(workers):
     """Keep an involute cut inside ``workers`` threads.
 
@@ -475,26 +476,18 @@ def test_involute_says_what_is_missing(document):
         else:
             named = False
         check("the message names the package to install", named)
-        fallen_back, spare = CreateNonCircularGearPair.create()
-        # Parameters of its own, so that building is this pair being drawn and
-        # not an outline cut earlier, while ncgears was there, being handed back.
-        fallen_back.function = "1 + 0.29 * cos(x)"
+        # Parameters of its own, so what follows is this pair being cut rather
+        # than one cut earlier, while ncgears was there, being handed back.
+        refused, mate = CreateNonCircularGearPair.create()
+        refused.function = "1 + 0.37 * cos(x)"
         document.recompute()
         check(
-            "a new pair falls back to wave teeth rather than to a refusal",
-            fallen_back.tooth_style == "wave" and fallen_back.Shape.isValid(),
-            "%s, %s" % (fallen_back.tooth_style, fallen_back.State),
-        )
-        document.removeObject(spare.Name)
-        document.removeObject(fallen_back.Name)
-
-        # Parameters of its own, so what follows cuts this pair rather than
-        # handing back one cut earlier.
-        refused, mate = make_pair(
-            document, tooth_style="involute", function="1 + 0.37 * cos(x)"
+            "a new pair asks for involute teeth whether ncgears is here or not",
+            refused.tooth_style == "involute",
+            refused.tooth_style,
         )
         check(
-            "a gear asked for involute teeth without ncgears will not build",
+            "and refuses to build rather than standing a wave tooth in for one",
             "Invalid" in refused.State or "Touched" in refused.State,
             refused.State,
         )
@@ -820,14 +813,7 @@ def test_involute_is_cut_once(document):
 
 
 def test_new_pairs_are_involute(document):
-    """A new pair starts on involute teeth, which is what a pair is worth having.
-
-    What it starts on without ncgears is checked where the rest of that is.
-    """
-    if not involute.available():
-        print("--   involute default check skipped: ncgears is not installed")
-        return
-
+    """A new pair starts on involute teeth, which is what a pair is worth having."""
     driver, mate = CreateNonCircularGearPair.create()
     document.recompute()
     check(
@@ -835,6 +821,11 @@ def test_new_pairs_are_involute(document):
         driver.tooth_style == "involute",
         driver.tooth_style,
     )
+    if not involute.available():
+        print("--   the rest of the default check needs ncgears")
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+        return
     check(
         "and builds on them without being asked twice",
         driver.Shape.isValid() and mate.Shape.isValid()
