@@ -568,6 +568,46 @@ def test_teeth_clear(document, driver, mate, label="", bound=0.02):
     )
 
 
+def test_involute_follows_the_pitch_line(document):
+    """The gear ncgears cuts stands where this workbench's own pitch line says.
+
+    ncgears walks the centrode the other way round than this workbench does,
+    so what it hands back has to be reflected in the line of centres before it
+    is drawn. An even f(x) hides that, and every other f(x) in this file is
+    even, so this one is not.
+    """
+    if not involute.available():
+        return
+
+    driver, mate = make_pair(
+        document,
+        tooth_style="involute",
+        function="1 + 0.35 * cos(x) + 0.22 * sin(2 * x)",
+    )
+    pair, _, _ = solve(driver)
+    tooth = tooth_size(driver, pair)
+    outline = min(driver.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
+    points = outline.discretize(Number=4000)
+    angle = np.array(
+        [math.atan2(point.y, point.x) % (2.0 * math.pi) for point in points]
+    )
+    radius = np.array([math.hypot(point.x, point.y) for point in points])
+    stands_at = np.interp(
+        angle,
+        np.append(pair.theta, 2.0 * math.pi),
+        np.append(pair.radius1, pair.radius1[0]),
+    )
+    worst = float(np.abs(radius - stands_at).max())
+    check(
+        "involute teeth stand on the pitch line f(x) solved to",
+        worst < 2.0 * tooth,
+        "%.4f mm off a %.4f mm tooth, whose root goes 1.25 of one down"
+        % (worst, tooth),
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+
 def test_creation_dialog(document):
     """The dialog the Gear Pair button opens, driven rather than described.
 
@@ -881,6 +921,7 @@ def main():
     test_involute_thinning(document)
     test_involute_refusals(document)
     test_involute_says_what_is_missing(document)
+    test_involute_follows_the_pitch_line(document)
     test_creation_dialog(document)
     test_involute_is_cut_once(document)
     test_new_pairs_are_involute(document)

@@ -47,6 +47,13 @@ FILLET_OF_ADDENDUM = 0.3
 # of them is never wrong, only slower.
 FEWEST_SAMPLES = 1024
 
+# ncgears walks the centrode clockwise and this workbench walks it
+# counter-clockwise, so a pair comes back reflected in the line of centres.
+# Reflecting it there is a symmetry of the assembly - both axes lie on that
+# line - so the pair meshes exactly as ncgears verified it, and an f(x) that is
+# not even draws the same gear in both tooth styles.
+MIRROR = np.array([1.0, -1.0])
+
 # How far the outline handed on may sit from the one ncgears drew, and how
 # close together or far apart its points may then be left, all in modules.
 # See ``_thinned`` for what each of the three is holding off.
@@ -231,11 +238,11 @@ def outlines(
         scale = float(center_distance) / float(cut.center_distance)
         error = float(cut.maximum_transmission_error)
 
-    drive = drive * scale
+    drive = drive * scale * MIRROR
     # The mate object carries a fixed placement - a half turn about z, then out
     # along x to the second axis - so the outline it is drawn from is the
     # assembled one brought back through that.
-    mate = np.array([center_distance, 0.0]) - placed * scale
+    mate = np.array([center_distance, 0.0]) - placed * scale * MIRROR
 
     bounds = (
         THINNING_TOLERANCE * module,

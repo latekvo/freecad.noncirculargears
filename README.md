@@ -162,24 +162,25 @@ mapping onto ncgears is and where it refuses.
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and thirty checks: both gears build as valid solids, the pitch
+A hundred and thirty-one checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, both modes
 solve, four pairs that turn at something other than 1:1 come out turning what
-they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
-reaches outside the `math` module or does not repeat as often as the turns need
-is refused rather than drawn, the dialog is built and typed into rather than
-described, a new pair comes up on involute teeth and says what to install
-rather than quietly changing style when it cannot cut them, and an involute
-pair is counted as it is rebuilt to show that one cut serves both gears and is
-not paid for twice.
+they were asked to, involute teeth stand on the pitch line `f(x)` solved to
+rather than on its reflection, an `f(x)` that goes negative, does not parse, is
+not finite, reaches outside the `math` module or does not repeat as often as
+the turns need is refused rather than drawn, the dialog is built and typed into
+rather than described, a new pair comes up on involute teeth and says what to
+install rather than quietly changing style when it cannot cut them, and an
+involute pair is counted as it is rebuilt to show that one cut serves both
+gears and is not paid for twice.
 
 A run holds itself to 40% of the cores - `CPU_SHARE` at the top of the file -
 because ncgears otherwise spreads every cut over the whole machine, which took
 a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
-Thirty-nine of them cut an involute pair and are skipped with a note where
+Forty of them cut an involute pair and are skipped with a note where
 ncgears is not installed, leaving ninety-one that run either way - including
 the ones that check what is done and said when it is missing. To run the lot against
 an ncgears kept out of FreeCAD's own environment, put it on the path for the

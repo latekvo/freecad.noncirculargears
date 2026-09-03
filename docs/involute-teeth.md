@@ -72,6 +72,15 @@ ncgears solves its own centre distance from the turns it is given, so the pair
 comes back scaled onto the one this pair is drawn at. That is a whole scaling,
 which leaves conjugate flanks conjugate.
 
+**The frame is reflected.** ncgears lays the centrode's angle out clockwise -
+`engine._analytic_frame` places the drive pitch point of parameter phi at
+`r(phi) * exp(-1j*phi)` - and this workbench lays it out counter-clockwise, so
+the pair comes back reflected in the line of centres. Both axes lie on that
+line, so reflecting it back is a symmetry of the assembly and the pair meshes
+exactly as ncgears verified it. An even f(x) hides the whole question - the
+pair and its reflection are the same shape - which is why one that is not even
+is among the checks.
+
 Two things had to be handled that only showed up against real outlines:
 
 **Thinning.** ncgears returns some fourteen thousand points a gear, an order of
