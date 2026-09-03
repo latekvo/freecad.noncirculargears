@@ -67,10 +67,29 @@ The mapping onto ncgears is close to one line each:
 | `tooth_height` | `addendum_factor = tooth_height * pi`, dedendum and fillet in proportion |
 | `backlash` | `clearance`, half of it a face, in modules |
 | `pressure_angle` | `pressure_angle_deg` |
+| one cross-section of a `helix_angle` | the centrode read from the angle whose arc is that section's, and the outlines turned back by it |
 
 ncgears solves its own centre distance from the turns it is given, so the pair
 comes back scaled onto the one this pair is drawn at. That is a whole scaling,
 which leaves conjugate flanks conjugate.
+
+**The frame is reflected.** ncgears lays the centrode's angle out clockwise -
+`engine._analytic_frame` places the drive pitch point of parameter phi at
+`r(phi) * exp(-1j*phi)` - and this workbench lays it out counter-clockwise, so
+the pair comes back reflected in the line of centres. Both axes lie on that
+line, so reflecting it back is a symmetry of the assembly and the pair meshes
+exactly as ncgears verified it. An even f(x) hides the whole question - the
+pair and its reflection are the same shape - which is why one that is not even
+is among the checks.
+
+**A tooth phase is a shift of the centrode.** ncgears anchors the first tooth
+where the centrode it is handed starts, and offers no phase of its own -
+`drive_start` looks like one, but its frame convention and its assembly
+convention disagree, so anything but 0 poses the pair a whole tooth out and the
+generation fails. What works is handing it `r(phi + delta)` and turning the
+outlines that come back by `-delta` and `+delta2`. A delta of exactly one
+circular pitch reproduces the very same gear, which is what pins both the
+anchoring and the frame down.
 
 Two things had to be handled that only showed up against real outlines:
 
@@ -105,6 +124,14 @@ write. Everything crossing the boundary is a plain float.
   a rebuild cutting the pair twice over - once for each half - and lets a style
   be gone back to for nothing. A refusal is kept the same way, because finding
   out why a recompute would not build means asking a second time.
+- **A cut per cross-section, for teeth that lean.** Nothing in a cut survives a
+  change of tooth phase: every tooth moves to a different point of the centrode,
+  where the curvature its flank is solved against is different, so the flank
+  solving, the cusp and undercut searches and the verification sweep all have to
+  be done again. What is genuinely phase-independent is the centrode
+  materialisation and the motion fit, measured at 0.6% of a call. The one lever
+  that is left is running the sections in separate processes; ncgears threads
+  inside a call but averages only about 1.4 cores of the one it is given.
 - **shapely and ezdxf**, which FreeCAD does not ship. It does ship numpy, scipy
   and sympy, which ncgears also wants.
 - **An f(x) SymPy can read and differentiate.** `min`, `max` and friends do not

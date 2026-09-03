@@ -48,7 +48,7 @@ from PySide import QtWidgets  # noqa: E402, after the platform is chosen
 
 from freecad.noncirculargears import dependencies, involute, noncircular
 from freecad.noncirculargears.commands import CreateNonCircularGearPair
-from freecad.noncirculargears.noncirculargear import solve
+from freecad.noncirculargears.noncirculargear import profiles, sections, solve
 from freecad.noncirculargears.taskpanel import GearPairPanel, parameters
 
 
@@ -413,7 +413,7 @@ def test_involute_thinning(document):
             ring[200:201],  # and then a long way round to the start
         )
     )
-    thinned = involute._thinned(outline, 0.01, 0.4, 1.5)
+    thinned = outline[involute._kept(outline, 0.01, 0.4, 1.5)]
     steps = np.linalg.norm(np.diff(np.vstack((thinned, thinned[:1])), axis=0), axis=1)
 
     check(
@@ -566,6 +566,251 @@ def test_teeth_clear(document, driver, mate, label="", bound=0.02):
         separation < 1e-6,
         "%.3g mm between them" % separation,
     )
+
+
+def outline_at(gear, height, samples=2000):
+    """The gear's cross-section at that height, in the gear's own frame."""
+    wires = gear.Shape.slice(App.Vector(0.0, 0.0, 1.0), height)
+    if len(wires) != 1:
+        return None
+    back = gear.Placement.inverse()
+    return np.array(
+        [
+            [back.multVec(point).x, back.multVec(point).y]
+            for point in wires[0].discretize(Number=samples)
+        ]
+    )
+
+
+def apart(one, other):
+    """The furthest either closed outline strays from the other, in mm.
+
+    Point against segment rather than point against point, so that two
+    outlines drawn from different numbers of points are compared as the curves
+    they stand for rather than as the samplings they arrived in.
+    """
+
+    def furthest(polyline, target):
+        step = np.roll(polyline, -1, axis=0) - polyline
+        span = np.einsum("ij,ij->i", step, step)
+        # a closed wire hands back its first point again at the end, and a
+        # segment of no length is the point it starts at
+        span = np.where(span > 0.0, span, 1.0)
+        return max(
+            float(
+                np.min(
+                    np.linalg.norm(
+                        polyline
+                        + np.clip(
+                            np.einsum("ij,ij->i", point - polyline, step) / span,
+                            0.0,
+                            1.0,
+                        )[:, None]
+                        * step
+                        - point,
+                        axis=1,
+                    )
+                )
+            )
+            for point in target
+        )
+
+    return max(furthest(one, other), furthest(other, one))
+
+
+def turning(sections_of):
+    """Which way round its own centre a gear's teeth move as it rises.
+
+    Positive is counter-clockwise. The sections stand point for point on the
+    same tooth, so what each point does between the bottom section and the top
+    one is what that tooth does, and its sign is the gear's hand.
+    """
+    first, last = sections_of[0], sections_of[-1]
+    return float(
+        np.mean(
+            first[:, 0] * (last[:, 1] - first[:, 1])
+            - first[:, 1] * (last[:, 0] - first[:, 0])
+        )
+    )
+
+
+# What the shape between two sections may stray from the pair cut for that
+# height, as a fraction of a tooth. Involute teeth are allowed more because the
+# pair they are held against is a second cut of its own, and the two thinnings
+# part company by a fifth of this before the raising is even reached.
+HELICAL_BOUNDS = {"wave": 0.02, "involute": 0.08}
+
+
+def test_helical_teeth(document):
+    """Teeth that lean across the height, which is a stack rather than one shape.
+
+    A helical gear is right only if it is the pair really cut for that height
+    at *every* height, so it is checked between two of the sections it was
+    raised on rather than on one of them. The mate is checked the same way, and
+    that is also where its hand shows: its teeth move the other way round its
+    own centre, which is what lets the two mesh at all.
+    """
+    for style in ("wave", "involute"):
+        if style == "involute" and not involute.available():
+            print("--   helical involute checks skipped: ncgears is not installed")
+            continue
+        label = ", %s teeth" % style
+        # the default height leans these teeth by very nearly the eighth of a
+        # pitch the sections are held to, which is where raising the gear is
+        # worst and so where holding it against a real cut says the most
+        driver, mate = make_pair(document, tooth_style=style, helix_angle="20 deg")
+        pair, _, scale = solve(driver)
+        tooth = tooth_size(driver, pair)
+        phases = sections(driver, pair)
+        stacked = profiles(driver, pair, scale)
+
+        check(
+            "leaning teeth are raised on more than one section" + label,
+            driver.helix_sections == len(phases) > 1,
+            "%d sections at %.4f mm apart along a %.4f mm pitch"
+            % (
+                driver.helix_sections,
+                phases[1],
+                pair.arc_length / noncircular.teeth_per_period(pair, driver.num_teeth),
+            ),
+        )
+        for name, gear in (("driver", driver), ("mate", mate)):
+            check(
+                "the helical %s builds a valid solid%s" % (name, label),
+                gear.Shape.ShapeType == "Solid" and gear.Shape.isValid(),
+                gear.Shape.ShapeType,
+            )
+            check(
+                "the helical %s is raised to the set height%s" % (name, label),
+                abs(gear.Shape.BoundBox.ZLength - driver.height.Value) < 1e-6,
+                "%.4f mm" % gear.Shape.BoundBox.ZLength,
+            )
+        for name, gear, expected in (
+            ("driver", driver, driver.num_teeth),
+            ("mate", mate, driver.mate_teeth),
+        ):
+            check(
+                "the helical %s has the teeth it should have%s" % (name, label),
+                count_teeth(gear, tooth) == expected,
+                "%d, expected %d" % (count_teeth(gear, tooth), expected),
+            )
+        separation = driver.Shape.distToShape(mate.Shape)[0]
+        check(
+            "the helical pair is drawn touching, not apart" + label,
+            separation < 1e-6,
+            "%.3g mm between them" % separation,
+        )
+
+        one, other = turning(stacked[0]), turning(stacked[1])
+        check(
+            "the mate takes the opposite hand" + label,
+            one * other < 0.0,
+            "driver %+.4f, mate %+.4f mm^2 a point" % (one, other),
+        )
+
+        halfway = 0.5 * driver.height.Value / (len(phases) - 1)
+        between = 0.5 * phases[1]
+        if style == "involute":
+            cut = involute.outlines(
+                pair,
+                driver.function,
+                driver.mode,
+                pair.center_distance,
+                scale,
+                driver.num_teeth,
+                driver.tooth_height,
+                driver.backlash.Value,
+                driver.pressure_angle,
+                driver.samples,
+                (between,),
+            )[:2]
+            cut = (cut[0][0], cut[1][0])
+        else:
+            cut = noncircular.tooth_profiles(
+                pair,
+                driver.num_teeth,
+                driver.points_per_tooth,
+                driver.tooth_height,
+                driver.backlash.Value,
+                between,
+            )
+        for name, gear, wanted in (
+            ("driver", driver, cut[0]),
+            ("mate", mate, cut[1]),
+        ):
+            got = outline_at(gear, halfway)
+            strayed = None if got is None else apart(got, wanted)
+            check(
+                "the helical %s is the pair cut for that height between two "
+                "sections%s" % (name, label),
+                strayed is not None and strayed < HELICAL_BOUNDS[style] * tooth,
+                "no single outline there"
+                if strayed is None
+                else "%.4f mm off a %.4f mm tooth" % (strayed, tooth),
+            )
+
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+
+
+def test_helical_limits(document):
+    """Straight teeth cost nothing, and teeth that lean too far are refused."""
+    driver, mate = make_pair(document, helix_angle="0 deg")
+    check(
+        "straight teeth are still raised on one section",
+        driver.helix_sections == 1,
+        "%d sections" % driver.helix_sections,
+    )
+    driver.helix_angle = "80 deg"
+    driver.height = "80 mm"
+    document.recompute()
+    check(
+        "teeth that lean further than the sections reach are refused",
+        "Invalid" in driver.State,
+        driver.State,
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
+
+
+def test_involute_follows_the_pitch_line(document):
+    """The gear ncgears cuts stands where this workbench's own pitch line says.
+
+    ncgears walks the centrode the other way round than this workbench does,
+    so what it hands back has to be reflected in the line of centres before it
+    is drawn. An even f(x) hides that, and every other f(x) in this file is
+    even, so this one is not.
+    """
+    if not involute.available():
+        return
+
+    driver, mate = make_pair(
+        document,
+        tooth_style="involute",
+        function="1 + 0.35 * cos(x) + 0.22 * sin(2 * x)",
+    )
+    pair, _, _ = solve(driver)
+    tooth = tooth_size(driver, pair)
+    outline = min(driver.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
+    points = outline.discretize(Number=4000)
+    angle = np.array(
+        [math.atan2(point.y, point.x) % (2.0 * math.pi) for point in points]
+    )
+    radius = np.array([math.hypot(point.x, point.y) for point in points])
+    stands_at = np.interp(
+        angle,
+        np.append(pair.theta, 2.0 * math.pi),
+        np.append(pair.radius1, pair.radius1[0]),
+    )
+    worst = float(np.abs(radius - stands_at).max())
+    check(
+        "involute teeth stand on the pitch line f(x) solved to",
+        worst < 2.0 * tooth,
+        "%.4f mm off a %.4f mm tooth, whose root goes 1.25 of one down"
+        % (worst, tooth),
+    )
+    document.removeObject(mate.Name)
+    document.removeObject(driver.Name)
 
 
 def test_creation_dialog(document):
@@ -881,6 +1126,9 @@ def main():
     test_involute_thinning(document)
     test_involute_refusals(document)
     test_involute_says_what_is_missing(document)
+    test_involute_follows_the_pitch_line(document)
+    test_helical_teeth(document)
+    test_helical_limits(document)
     test_creation_dialog(document)
     test_involute_is_cut_once(document)
     test_new_pairs_are_involute(document)
