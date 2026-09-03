@@ -56,7 +56,7 @@ MIRROR = np.array([1.0, -1.0])
 
 # How far the outline handed on may sit from the one ncgears drew, and how
 # close together or far apart its points may then be left, all in modules.
-# See ``_thinned`` for what each of the three is holding off.
+# See ``_kept`` for what each of the three is holding off.
 THINNING_TOLERANCE = 1e-3
 SHORTEST_GAP = 0.04
 LONGEST_GAP = 0.1
@@ -118,8 +118,8 @@ def _as_expression(function, symbol):
     return parsed
 
 
-def _thinned(outline, tolerance, shortest, longest):
-    """The outline cut down to what a spline through it needs, and no further.
+def _kept(outline, tolerance, shortest, longest):
+    """Which of the outline's points a spline through it needs, and no more.
 
     ncgears samples a flank an order of magnitude more finely than a spline
     needs, so its points have to be thinned before OCC is asked to interpolate
@@ -173,7 +173,105 @@ def _thinned(outline, tolerance, shortest, longest):
             for step in range(1, pieces)
         )
 
-    return outline[filled]
+    return filled
+
+
+def _walk(outline):
+    """Length along the closed outline at each point, and once all the way round."""
+    closed = np.vstack((outline, outline[:1]))
+    return np.concatenate(
+        ([0.0], np.cumsum(np.linalg.norm(np.diff(closed, axis=0), axis=1)))
+    )
+
+
+def _fractions(outline, kept):
+    """How far round the outline each of ``kept`` stands, in fractions of it."""
+    walk = _walk(outline)
+    return walk[kept] / walk[-1]
+
+
+def _along(outline, fractions):
+    """The outline read at those fractions of its own length, from its first point.
+
+    Sections of one helical gear are raised point against point, so they have
+    to be read at fractions that mean the same thing on each. They do: a
+    section is the one below it with the teeth slid along the pitch line, so
+    the same tooth stands the same way round both. It is the outline ncgears
+    drew that is read rather than the thinned one, which keeps the reading off
+    a chord: its points are twenty microns apart, and a fifth of a millimetre
+    once thinned.
+    """
+    walk = _walk(outline)
+    closed = np.vstack((outline, outline[:1]))
+    want = np.asarray(fractions) * walk[-1]
+    return np.column_stack([np.interp(want, walk, closed[:, axis]) for axis in (0, 1)])
+
+
+def _turned(points, angle):
+    """``points`` turned about the origin."""
+    cos, sin = math.cos(angle), math.sin(angle)
+    across, up = points[:, 0], points[:, 1]
+    return np.column_stack((cos * across - sin * up, sin * across + cos * up))
+
+
+def _whole_turn(pair, mate):
+    """The arc of the whole of one gear's pitch line, all its periods together."""
+    return pair.arc_length * (pair.mate_lobes if mate else pair.driver_lobes)
+
+
+def _pitch_table(pair, mate):
+    """The gear's pitch line as (angle, radius, arc), read in order of angle.
+
+    The copies either side let a reading near the seam be taken without a wrap
+    in the middle of it. Ordered by angle, which on the mate runs backwards
+    along the arc, so only a reading that starts from an angle comes from here.
+    """
+    points, arcs = pair.pitch_line(mate)
+    angle = np.arctan2(points[:, 1], points[:, 0]) % TWO_PI
+    order = np.argsort(angle)
+    angle, radius, arc = angle[order], np.hypot(*points[order].T), arcs[order]
+    whole = _whole_turn(pair, mate)
+    return (
+        np.concatenate((angle - TWO_PI, angle, angle + TWO_PI)),
+        np.tile(radius, 3),
+        np.concatenate((arc - whole, arc, arc + whole)),
+    )
+
+
+def _first_crossing(outline, table):
+    """The arc at which ``outline`` first passes from inside its pitch line to outside.
+
+    One tooth carries one such crossing, so this names a tooth, and it names it
+    where the outline runs across the pitch line rather than along it - the
+    tips and the roots, which is where the two are hardest to tell apart, are
+    half a tooth away in either direction.
+    """
+    angle, radius, arc = table
+    at = np.arctan2(outline[:, 1], outline[:, 0]) % TWO_PI
+    outside = np.hypot(*outline.T) - np.interp(at, angle, radius)
+    rising = np.nonzero((outside <= 0.0) & (np.roll(outside, -1) > 0.0))[0]
+    if not len(rising):
+        raise ValueError("an outline that never crosses its own pitch line")
+    return float(np.interp(at[rising[0]], angle, arc))
+
+
+def _started_at(outline, pair, mate, wanted):
+    """``outline`` rolled round to begin at the tooth standing at ``wanted``.
+
+    Sections of a helical gear are raised point against point, so each has to
+    begin on the same tooth as the last, one pitch further along the line if
+    the teeth have moved that far. The tooth it lands on is the one the section
+    before it began on: consecutive sections are a fraction of a pitch apart,
+    and the next tooth along is a whole one.
+    """
+    points, arcs = pair.pitch_line(mate)
+    whole = _whole_turn(pair, mate)
+    walk = np.append(arcs, whole)
+    closed = np.vstack((points, points[:1]))
+    standing = np.array(
+        [np.interp(wanted % whole, walk, closed[:, axis]) for axis in (0, 1)]
+    )
+    return np.roll(outline, -int(np.argmin(np.hypot(*(outline - standing).T))), axis=0)
 
 
 def outlines(
@@ -187,8 +285,9 @@ def outlines(
     backlash,
     pressure_angle,
     samples,
+    phases=(0.0,),
 ):
-    """Both outlines and ncgears' reading of the pair, as (drive, mate, error).
+    """Both gears' outlines at each of ``phases``, as (drives, mates, error).
 
     The pitch curve is handed over as the expression it came from rather than
     as the points already solved for, because ncgears differentiates it. It
@@ -196,11 +295,19 @@ def outlines(
     comes back scaled onto the centre distance this pair is drawn at - a whole
     scaling, which leaves the flanks as conjugate as they were.
 
-    The error returned is ncgears' own: the worst the delivered motion strays
-    from the one asked for, in degrees, over a staggered grid of mesh phases.
-    It is reported rather than measured again here because the measure this
-    workbench applies to wave teeth cannot be applied to these ones; see
-    ``noncircular.interference``.
+    A phase is how far along the pitch line the teeth of that section stand,
+    which is what makes a helical gear when the sections are stacked. ncgears
+    starts the teeth where the centrode it is handed starts, so a section is
+    cut from the centrode read from that point on and then turned back until
+    its pitch line lies where the others' do. Every section is a pair ncgears
+    has verified in its own right, meshing at the one position the pair is
+    drawn in - which is what a helical pair has to do at every height.
+
+    The error returned is ncgears' own, worst of the sections: the worst the
+    delivered motion strays from the one asked for, in degrees, over a
+    staggered grid of mesh phases. It is reported rather than measured again
+    here because the measure this workbench applies to wave teeth cannot be
+    applied to these ones; see ``noncircular.interference``.
     """
     ncgears, angle = _ncgears()
     if tooth_height <= 0.0:
@@ -218,35 +325,68 @@ def outlines(
     module = float(pair.arc_length) * pair.driver_lobes / (num_teeth * math.pi)
     addendum = float(tooth_height) * math.pi
 
-    with tempfile.TemporaryDirectory() as directory:
-        cut = ncgears.generate_from_centrode(
-            curve,
-            name="pair",
-            teeth=int(num_teeth),
-            module=module,
-            pressure_angle_deg=float(pressure_angle),
-            addendum_factor=addendum,
-            dedendum_factor=addendum * DEDENDUM_OF_ADDENDUM,
-            fillet_factor=addendum * FILLET_OF_ADDENDUM,
-            clearance=0.5 * float(backlash) / module,
-            target_cycle_delta=TWO_PI * pair.driver_lobes / pair.mate_lobes,
-            samples=max(FEWEST_SAMPLES, int(samples)),
-            output_directory=directory,
+    def section(phase):
+        """One cross-section, cut with its teeth ``phase`` along the pitch line."""
+        driver_turn, mate_turn = pair.angles_at_arc(phase)
+        with tempfile.TemporaryDirectory() as directory:
+            cut = ncgears.generate_from_centrode(
+                curve.subs(angle, angle + driver_turn),
+                name="pair",
+                teeth=int(num_teeth),
+                module=module,
+                pressure_angle_deg=float(pressure_angle),
+                addendum_factor=addendum,
+                dedendum_factor=addendum * DEDENDUM_OF_ADDENDUM,
+                fillet_factor=addendum * FILLET_OF_ADDENDUM,
+                clearance=0.5 * float(backlash) / module,
+                target_cycle_delta=TWO_PI * pair.driver_lobes / pair.mate_lobes,
+                samples=max(FEWEST_SAMPLES, int(samples)),
+                output_directory=directory,
+            )
+            drive = _turned(np.asarray(cut.drive_outline, dtype=float), -driver_turn)
+            driven = _turned(np.asarray(cut.driven_outline, dtype=float), mate_turn)
+            placed = driven + np.array([float(cut.center_distance), 0.0])
+            scale = float(center_distance) / float(cut.center_distance)
+            error = float(cut.maximum_transmission_error)
+        # The mate object carries a fixed placement - a half turn about z, then
+        # out along x to the second axis - so the outline it is drawn from is
+        # the assembled one brought back through that.
+        return (
+            drive * scale * MIRROR,
+            np.array([center_distance, 0.0]) - placed * scale * MIRROR,
+            error,
         )
-        drive = np.asarray(cut.drive_outline, dtype=float)
-        placed = np.asarray(cut.placed_driven_outline, dtype=float)
-        scale = float(center_distance) / float(cut.center_distance)
-        error = float(cut.maximum_transmission_error)
-
-    drive = drive * scale * MIRROR
-    # The mate object carries a fixed placement - a half turn about z, then out
-    # along x to the second axis - so the outline it is drawn from is the
-    # assembled one brought back through that.
-    mate = np.array([center_distance, 0.0]) - placed * scale * MIRROR
 
     bounds = (
         THINNING_TOLERANCE * module,
         SHORTEST_GAP * module,
         LONGEST_GAP * module,
     )
-    return _thinned(drive, *bounds), _thinned(mate, *bounds), error
+    if len(phases) == 1:
+        drive, mate, error = section(phases[0])
+        return [drive[_kept(drive, *bounds)]], [mate[_kept(mate, *bounds)]], error
+
+    tables = (_pitch_table(pair, False), _pitch_table(pair, True))
+    cut, error, anchors = [], 0.0, None
+    for phase in phases:
+        drive, mate, strayed = section(phase)
+        if anchors is None:
+            anchors = [
+                _first_crossing(outline, table) - phase
+                for outline, table in zip((drive, mate), tables)
+            ]
+        cut.append(
+            (
+                _started_at(drive, pair, False, anchors[0] + phase),
+                _started_at(mate, pair, True, anchors[1] + phase),
+            )
+        )
+        error = max(error, strayed)
+
+    def stacked(outlines):
+        """Every section read at the fractions the first one's thinning chose."""
+        fractions = _fractions(outlines[0], _kept(outlines[0], *bounds))
+        return [_along(outline, fractions) for outline in outlines]
+
+    drives, mates = zip(*cut)
+    return stacked(drives), stacked(mates), error

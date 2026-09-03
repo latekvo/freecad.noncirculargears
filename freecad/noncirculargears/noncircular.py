@@ -214,6 +214,44 @@ class PitchPair(object):
         slope = _derivative(self.radius1, step)
         self.arc, self.arc_length = _cumulative(np.hypot(self.radius1, slope), step)
 
+    def angles_at_arc(self, arc):
+        """How far each gear has turned once the pitch lines have rolled ``arc``.
+
+        Returned as (driver, mate), and carried on past the end of a period
+        rather than wrapped, since the next period is the same one turned by
+        its own span.
+        """
+        periods, part = divmod(float(arc), self.arc_length)
+        walk = np.append(self.arc, self.arc_length)
+
+        def along(values, closing_value):
+            return float(np.interp(part, walk, np.append(values, closing_value)))
+
+        return (
+            along(self.theta, self.span) + periods * self.span,
+            along(self.angle2, self.mate_span) + periods * self.mate_span,
+        )
+
+    def pitch_line(self, mate=False):
+        """One gear's whole pitch line in its own frame, as (points, arcs).
+
+        The gear carries ``lobes`` copies of the period, each turned by its own
+        span, and the arc runs on across the joins rather than starting over,
+        so a point on the line is named by one number all the way round. Both
+        gears are read off the same arc, which is what rolling without slipping
+        means and what lets a tooth on one be placed against a gap on the other.
+        """
+        if mate:
+            lobes, span, winding = self.mate_lobes, self.mate_span, -1.0
+            turn, radius = self.angle2, self.radius2
+        else:
+            lobes, span, winding = self.driver_lobes, self.span, 1.0
+            turn, radius = self.theta, self.radius1
+        angles = winding * (turn + span * np.arange(lobes)[:, None]).ravel()
+        radii = np.tile(radius, lobes)
+        arcs = (self.arc + self.arc_length * np.arange(lobes)[:, None]).ravel()
+        return np.column_stack((radii * np.cos(angles), radii * np.sin(angles))), arcs
+
     @property
     def min_ratio(self):
         return float(self.ratio.min())
@@ -222,25 +260,36 @@ class PitchPair(object):
     def max_ratio(self):
         return float(self.ratio.max())
 
-    def resample(self, count):
+    def resample(self, count, offset=0.0):
         """The pair at ``count`` points spaced equally along the pitch lines.
 
         Rolling without slipping makes the two arc lengths advance together
         - r2 * dphi2 is r1 * dphi1 and dr2 is -dr1 - so one arc parameter
         drives both curves, which is what keeps their teeth in step.
+
+        ``offset`` moves where along the lines the points are read without
+        moving the arc they are handed back under, so a tooth drawn at one of
+        them keeps its shape and stands somewhere else on the gear. That is
+        what a helical gear's cross-section is, and it also leaves the sections
+        of one gear point for point on the same tooth, which is what raising
+        the gear on them needs.
         """
         arc = np.append(self.arc, self.arc_length)
         targets = np.linspace(0.0, self.arc_length, count, endpoint=False)
+        periods, along_period = np.divmod(targets + offset, self.arc_length)
 
-        def along(values, closing_value):
-            return np.interp(targets, arc, np.append(values, closing_value))
+        def along(values, closing_value, per_period=0.0):
+            return (
+                np.interp(along_period, arc, np.append(values, closing_value))
+                + periods * per_period
+            )
 
         return (
             targets,
             along(self.radius1, self.radius1[0]),
-            along(self.theta, self.span),
+            along(self.theta, self.span, self.span),
             along(self.radius2, self.radius2[0]),
-            along(self.angle2, self.mate_span),
+            along(self.angle2, self.mate_span, self.mate_span),
         )
 
 
@@ -372,7 +421,9 @@ def interference(pair, driver, mate, steps=719):
     return worst
 
 
-def tooth_profiles(pair, num_teeth, points_per_tooth, tooth_height, backlash=0.0):
+def tooth_profiles(
+    pair, num_teeth, points_per_tooth, tooth_height, backlash=0.0, phase=0.0
+):
     """Both gears' outlines, in their own frames, as (n, 2) arrays of points.
 
     The teeth are one wave of a period's own tooth count along the arc length
@@ -387,11 +438,18 @@ def tooth_profiles(pair, num_teeth, points_per_tooth, tooth_height, backlash=0.0
     Gear 2 is wound the other way round its centre, which is what makes the two
     counter-rotate once gear 2 is turned to face gear 1.
 
+    ``phase`` moves the teeth along the pitch line without moving the pitch
+    line, which is the cross-section a helical gear has at that height. It is
+    the points that are moved along rather than the wave, so that the same
+    point of two sections is the same point of the same tooth.
+
     One period is drawn and then repeated around each gear. Each takes a whole
     number of teeth from it, which is what carries the wave across the joins.
     """
     per_period = teeth_per_period(pair, num_teeth)
-    arc, radius1, angle1, radius2, angle2 = pair.resample(per_period * points_per_tooth)
+    arc, radius1, angle1, radius2, angle2 = pair.resample(
+        per_period * points_per_tooth, phase
+    )
 
     pitch = pair.arc_length / per_period
     wave = tooth_height * pitch * np.sin(TWO_PI * arc / pitch)

@@ -24,6 +24,7 @@ placing itself on the line of centres in the position the two are drawn for.
 """
 
 import collections
+import math
 
 from freecad import app
 from freecad import part
@@ -46,6 +47,44 @@ POINTS_PER_SPAN = 6
 # from; see ``profiles``. Enough for both styles of a pair, and a few edits back.
 CUTS_KEPT = 8
 CUTS = collections.OrderedDict()
+
+# How far a helical gear's teeth may move between one cross-section and the
+# next, as a fraction of the circular pitch, and how many sections that is
+# allowed to come to. The gear is ruled from one section to the next, so what
+# it costs falls with the square of the step; an eighth of a pitch puts the
+# shape halfway between two sections 0.005 mm from the pair cut for that height
+# on the default pair, which is inside the 0.009 mm the thinning already moves
+# the outline by. The count is capped by refusing rather than by opening the
+# step out, since teeth leaning far enough to reach it are not a gear.
+SECTION_STEP = 0.125
+MOST_SECTIONS = 65
+
+
+def sections(obj, pair):
+    """How far along the pitch line the teeth stand at each height of ``obj``.
+
+    Straight teeth stand in one place, so there is one section and the gear is
+    extruded from it. Leaning teeth move along the pitch line as the gear rises
+    - by the height times the tangent of the angle they lean at - and the gear
+    is raised on sections cut at that many places. Both gears' teeth move
+    the same way along the arc the two roll off each other, which is what keeps
+    every height meshing and what leaves the mate with the opposite hand.
+    """
+    slide = obj.height.Value * math.tan(math.radians(obj.helix_angle.Value))
+    if not slide:
+        return (0.0,)
+    pitch = pair.arc_length / noncircular.teeth_per_period(pair, obj.num_teeth)
+    steps = int(math.ceil(abs(slide) / (SECTION_STEP * pitch)))
+    if steps >= MOST_SECTIONS:
+        raise ValueError(
+            "teeth leaning {:.4g} degrees across {:.4g} mm move {:.4g} pitches "
+            "along the pitch line, which wants {} cross-sections and at most "
+            "{} are cut".format(
+                obj.helix_angle.Value, obj.height.Value, abs(slide) / pitch,
+                steps + 1, MOST_SECTIONS,
+            )
+        )
+    return tuple(slide * step / steps for step in range(steps + 1))
 
 
 def stamp_version(obj):
@@ -74,7 +113,7 @@ def solve(obj):
 
 
 def profiles(obj, pair, scale):
-    """Both gears' outlines for the parameters on ``obj``.
+    """Both gears' cross-sections for the parameters on ``obj``.
 
     Both halves of a pair are drawn from the driving gear's outlines and
     FreeCAD recomputes the two objects separately, so without this an involute
@@ -86,7 +125,9 @@ def profiles(obj, pair, scale):
     recompute swallows the reason and the dialog has to ask a second time to
     have it; the second ask is the same refusal, and is not worth seconds.
     """
+    phases = sections(obj, pair)
     key = (
+        phases,
         obj.tooth_style,
         obj.mode,
         obj.function,
@@ -104,7 +145,7 @@ def profiles(obj, pair, scale):
         CUTS.move_to_end(key)
     else:
         try:
-            CUTS[key] = _cut_profiles(obj, pair, scale)
+            CUTS[key] = _cut_profiles(obj, pair, scale, phases)
         except involute.InvoluteUnavailable:
             # Not decided by the parameters: installing ncgears must lift it.
             raise
@@ -118,18 +159,19 @@ def profiles(obj, pair, scale):
     return cut
 
 
-def _cut_profiles(obj, pair, scale):
-    """The two outlines and how far the pair strays from f(x), as each style measures it.
+def _cut_profiles(obj, pair, scale, phases):
+    """Both gears' sections, and how far the pair strays from f(x).
 
     Each style is measured its own way, because neither measure fits the other
     shape. A wave tooth is not conjugate, so what matters is how far it cuts
     in. An involute flank is, so what matters is the motion it delivers - and
     it cannot be put through the first measure at all, which reads an outline
     as a radius against an angle and so needs one a flank with a fillet under
-    it does not give.
+    it does not give. Either way it is the worst of the sections that is
+    reported, since a helical pair is only as good as its worst height.
     """
     if obj.tooth_style == "involute":
-        drive, mate, error = involute.outlines(
+        drives, mates, error = involute.outlines(
             pair,
             obj.function,
             obj.mode,
@@ -140,19 +182,34 @@ def _cut_profiles(obj, pair, scale):
             obj.backlash.Value,
             obj.pressure_angle,
             obj.samples,
+            phases,
         )
-        return drive, mate, 0.0, error
-    drive, mate = noncircular.tooth_profiles(
-        pair,
-        obj.num_teeth,
-        obj.points_per_tooth,
-        obj.tooth_height,
-        obj.backlash.Value,
+        return drives, mates, 0.0, error
+    cut = [
+        noncircular.tooth_profiles(
+            pair,
+            obj.num_teeth,
+            obj.points_per_tooth,
+            obj.tooth_height,
+            obj.backlash.Value,
+            phase,
+        )
+        for phase in phases
+    ]
+    drives = [drive for drive, _ in cut]
+    mates = [mate for _, mate in cut]
+    penetration = max(
+        noncircular.interference(pair, drive, mate) for drive, mate in cut
     )
-    return drive, mate, noncircular.interference(pair, drive, mate), 0.0
+    return drives, mates, penetration, 0.0
 
 
-def outline_wire(points, span=POINTS_PER_SPAN):
+def span_count(points, span=POINTS_PER_SPAN):
+    """How many B-splines to leave an outline of ``points`` in."""
+    return max(1, min(len(points) // span, len(points) // 2))
+
+
+def outline_wire(points, pieces=None):
     """The closed curve through ``points``, handed over as short B-splines.
 
     One periodic spline is interpolated through the points and then cut into
@@ -161,10 +218,14 @@ def outline_wire(points, span=POINTS_PER_SPAN):
     faces rather than one large one, and it is far faster at that - the same
     reason freecad.gears builds its wires from short splines. The 3D view pays
     this on every rebuild, so none of it shows up in a recompute.
+
+    ``pieces`` is how many to cut it into, which the sections of one helical
+    gear all have to agree on: the gear is raised piece against piece.
     """
     curve = part.BSplineCurve()
     curve.interpolate(Points=[fcvec(point) for point in points], PeriodicFlag=True)
-    pieces = max(1, min(len(points) // span, len(points) // 2))
+    if pieces is None:
+        pieces = span_count(points)
     start, length = curve.FirstParameter, curve.LastParameter - curve.FirstParameter
     cuts = [start + length * index / pieces for index in range(pieces + 1)]
     spans = []
@@ -175,12 +236,53 @@ def outline_wire(points, span=POINTS_PER_SPAN):
     return part.Wire(spans)
 
 
-def make_shape(points, height):
-    """A closed outline through ``points``, extruded when ``height`` is set."""
-    wire = outline_wire(points)
+def make_shape(cross_sections, height):
+    """The gear these ``cross_sections`` stack into, over ``height``.
+
+    Straight teeth leave one section, which is extruded. Leaning teeth leave
+    several, standing at equal heights, and the gear is raised on them. That
+    is what a gear whose pitch line is not a circle needs: the twist that
+    carries a circular gear's section up its own helix is a turn about the
+    axis, and this one is not.
+
+    It is raised as a row of surfaces ruled from one section to the next rather
+    than by ``makeLoft`` through the lot, because a loft searches the wires'
+    vertices for the pairing that matches them best, and on sections whose
+    teeth have moved along by less than one tooth that can be the pairing which
+    undoes the move - joining each tooth tip to a point partway down the next
+    section's flank. Whether it is turns on how the wire's edges compare with
+    the move: at one edge per 0.98 mm against a 0.91 mm step the loft reads
+    0.20 mm from the section really cut halfway up, and at 1.95 mm an edge it
+    reads 0.015 mm. Ruling pairs the wires edge for edge whatever those two
+    lengths are, and reads 0.019 mm. What it gives up is smoothness up the
+    flank, which is faceted between sections by the same 0.005 mm the sections
+    are spaced to allow.
+
+    Each section is left in fewer pieces the more sections there are, so that a
+    gear carries about as many faces however it is raised; see ``outline_wire``
+    for what the pieces are for.
+    """
     if height <= 0.0:
-        return wire
-    return part.Face(wire).extrude(app.Vector(0.0, 0.0, height))
+        return outline_wire(cross_sections[0])
+    if len(cross_sections) == 1:
+        return part.Face(outline_wire(cross_sections[0])).extrude(
+            app.Vector(0.0, 0.0, height)
+        )
+    steps = len(cross_sections) - 1
+    pieces = max(1, span_count(cross_sections[0]) // steps)
+    wires = []
+    for index, points in enumerate(cross_sections):
+        wire = outline_wire(points, pieces)
+        wire.translate(app.Vector(0.0, 0.0, height * index / steps))
+        wires.append(wire)
+    faces = []
+    for below, above in zip(wires, wires[1:]):
+        faces.extend(
+            part.makeRuledSurface(one, other)
+            for one, other in zip(below.Edges, above.Edges)
+        )
+    faces.extend((part.Face(wires[0]), part.Face(wires[-1])))
+    return part.makeSolid(part.makeShell(faces))
 
 
 class NonCircularGear(BaseGear):
@@ -272,6 +374,18 @@ class NonCircularGear(BaseGear):
             ),
         ).height = "5 mm"
         obj.addProperty(
+            "App::PropertyAngle",
+            "helix_angle",
+            "base",
+            QT_TRANSLATE_NOOP(
+                "App::Property",
+                "angle the teeth lean at across the height, in degrees; 0 "
+                "leaves them straight. The mate takes the opposite hand, and "
+                "an involute pair is cut once per cross-section, so what this "
+                "costs is helix_sections times a straight pair",
+            ),
+        ).helix_angle = "0 deg"
+        obj.addProperty(
             "App::PropertyFloatConstraint",
             "tooth_height",
             "accuracy",
@@ -342,6 +456,13 @@ class NonCircularGear(BaseGear):
                 "the turns the two make",
             ),
             (
+                "helix_sections",
+                "App::PropertyInteger",
+                "cross-sections the gear is raised on; 1 for straight "
+                "teeth, and otherwise enough to keep the teeth within an "
+                "eighth of a circular pitch of the section below",
+            ),
+            (
                 "tooth_interference",
                 "App::PropertyDistance",
                 "deepest wave teeth cut into one another over a revolution; "
@@ -373,6 +494,7 @@ class NonCircularGear(BaseGear):
             )
         driver, _, penetration, error = profiles(obj, pair, scale)
         obj.solved_center_distance = distance
+        obj.helix_sections = len(driver)
         obj.ratio_scale = scale
         obj.min_ratio = pair.min_ratio
         obj.max_ratio = pair.max_ratio
