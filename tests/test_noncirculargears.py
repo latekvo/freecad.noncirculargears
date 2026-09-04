@@ -547,10 +547,14 @@ def test_involute_says_what_is_missing(document):
         try:
             involute.outlines(None, "1", "gear ratio", 60.0, 1.0, 24, 0.14, 0.0, 20.0, 1024)
         except involute.InvoluteUnavailable as err:
-            named = "ncgears" in str(err)
+            said = str(err)
         else:
-            named = False
-        check("the message names the package to install", named)
+            said = "no refusal"
+        check(
+            "the message names the build to install",
+            dependencies.requirement("ncgears") in said,
+            said,
+        )
         # Parameters of its own, so what follows is this pair being cut rather
         # than one cut earlier, while ncgears was there, being handed back.
         refused, mate = CreateNonCircularGearPair.create()
@@ -928,6 +932,32 @@ def test_what_is_fetched_is_what_is_absent(document):
         sys.modules.update(blocked)
 
 
+def test_both_installers_ask_for_one_build(document):
+    """package.xml and dependencies name the same ncgears, down to the build.
+
+    Two installers fetch it - the Addon Manager from package.xml, the workbench
+    itself from ``REQUIREMENTS`` - and they are separately written, so the pair
+    a user ends up with depends on which route they came in by. Since what is
+    asked for now carries a version, drifting apart is a thing that can happen
+    quietly, and the two are compared here so that it cannot.
+    """
+    import xml.etree.ElementTree as ElementTree
+
+    manifest = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "package.xml"
+    )
+    asked = [
+        (element.text or "").strip()
+        for element in ElementTree.parse(manifest).iter()
+        if element.tag.endswith("depend") and element.get("type") == "python"
+    ]
+    check(
+        "package.xml asks for the ncgears dependencies.py installs",
+        asked == [dependencies.requirement("ncgears")],
+        "%s against %s" % (asked, [dependencies.requirement("ncgears")]),
+    )
+
+
 def test_new_pairs_are_involute(document):
     """A new pair starts on involute teeth, which is what a pair is worth having."""
     driver, mate = CreateNonCircularGearPair.create()
@@ -970,6 +1000,7 @@ def main():
     test_involute_is_cut_once(document)
     test_new_pairs_are_involute(document)
     test_what_is_fetched_is_what_is_absent(document)
+    test_both_installers_ask_for_one_build(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))
