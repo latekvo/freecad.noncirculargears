@@ -44,8 +44,8 @@ would be worse than useless - which comes to some 27 MB.
 
 If that cannot be done, the Report view says why, and a pair says the same
 rather than quietly standing a wave tooth in for an involute one, which would
-leave a pair that is not conjugate looking exactly like one that is. Wave teeth
-go on working throughout. To do it by hand:
+leave a pair that is not conjugate looking exactly like one that is. Wave and
+simple gears go on working throughout. To do it by hand:
 
     pip install ncgears
 
@@ -69,9 +69,9 @@ back out, and the property editor reaches the same properties afterwards.
 | `num_teeth` | teeth on the driving gear |
 | `mate_turns`, `driver_turns` | turns each gear makes against the other |
 | `height` | extrusion height; `0` leaves the bare outline |
-| `tooth_style` | conjugate involute flanks, the default, or a wave laid on the pitch line |
+| `tooth_style` | conjugate involute flanks, the default; a wave laid on the pitch line; or simple, which is the pitch line and no teeth |
 | `tooth_height` | tooth height above the pitch line, as a fraction of the circular pitch |
-| `pressure_angle` | angle the involute flanks press at; wave teeth have none |
+| `pressure_angle` | angle the involute flanks press at; the other styles have none |
 | `backlash` | gap held open between the two tooth surfaces |
 | `samples`, `points_per_tooth` | how finely `f(x)` and the outline are sampled |
 
@@ -120,7 +120,7 @@ the mate comes out with `driver_turns` times as many teeth.
 
 ![f(x) = 1 + 0.45 * cos(2 * x) with mate_turns = 2](docs/pair-two-to-one.png)
 
-## Two things worth knowing
+## Four things worth knowing
 
 **Your `f(x)` may be scaled.** The second gear only closes into itself if the
 integral of `1 / f` over the turn comes to a whole turn of it. In gear ratio
@@ -158,13 +158,21 @@ reads 0 for the other's teeth - and
 [docs/involute-teeth.md](docs/involute-teeth.md) says why, along with what the
 mapping onto ncgears is and where it refuses.
 
+**`tooth_style = simple` draws no teeth at all.** Both gears come out as their
+bare pitch lines, the way `simple` leaves a freecad.gears gear its pitch
+cylinder. `tooth_height`, `backlash` and `pressure_angle` do not reach it, and
+both measures read 0 because there is nothing laid on either curve to measure.
+It costs what solving the pitch pair costs. It is the way to see the shape
+`f(x)` really comes to, and the way out to anything that cuts its own teeth.
+
 ## Checking it
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and thirty checks: both gears build as valid solids, the pitch
+A hundred and forty-five checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
-the teeth clear each other and are counted off the built shapes, both modes
+the teeth clear each other and are counted off the built shapes, a simple pair
+comes out on the pitch line `f(x)` asks for with nothing laid on it, both modes
 solve, four pairs that turn at something other than 1:1 come out turning what
 they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
 reaches outside the `math` module or does not repeat as often as the turns need
@@ -180,10 +188,10 @@ a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
 Thirty-nine of them cut an involute pair and are skipped with a note where
-ncgears is not installed, leaving ninety-one that run either way - including
-the ones that check what is done and said when it is missing. To run the lot against
-an ncgears kept out of FreeCAD's own environment, put it on the path for the
-run:
+ncgears is not installed, leaving a hundred and six that run either way -
+including the ones that check what is done and said when it is missing. To run
+the lot against an ncgears kept out of FreeCAD's own environment, put it on the
+path for the run:
 
     freecadcmd -P path/to/site-packages tests/test_noncirculargears.py
 

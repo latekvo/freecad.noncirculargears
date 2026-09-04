@@ -321,6 +321,81 @@ def test_rejects_impossible_turns(document):
         document.removeObject(driver.Name)
 
 
+SIMPLE_CASES = (
+    ("", {}),
+    (", a driver of two lobes", {"function": "1 + 0.45 * cos(2 * x)", "mate_turns": 2}),
+)
+
+
+def test_simple_teeth(document):
+    """The simple style, which is the pitch lines themselves and nothing on them.
+
+    Where the outline lies is checked against f(x) rather than against the
+    points it was drawn from, and the maxima are counted off the built shape,
+    because a style that laid a shrunken tooth on the pitch line would pass
+    anything short of that.
+    """
+    for label, overrides in SIMPLE_CASES:
+        driver, mate = make_pair(document, tooth_style="simple", **overrides)
+        pair, distance, scale = solve(driver)
+        tooth = tooth_size(driver, pair)
+
+        for name, gear in (("driver", driver), ("mate", mate)):
+            check(
+                "simple %s builds a valid solid%s" % (name, label),
+                gear.Shape.ShapeType == "Solid" and gear.Shape.isValid(),
+                gear.Shape.ShapeType,
+            )
+
+        points = outline_points(driver)
+        angle = np.arctan2(points[:, 1], points[:, 0])
+        ratio = eval(  # noqa: S307, the f(x) the gear was given, over the same angles
+            driver.function, {"__builtins__": {}}, {"cos": np.cos, "x": angle}
+        )
+        wanted = distance / (1 + scale * ratio)
+        strays = np.abs(np.hypot(points[:, 0], points[:, 1]) - wanted)
+        check(
+            "the simple driver is drawn on the pitch line f(x) asks for" + label,
+            strays.max() < 1e-3,
+            "%.3g mm off it at worst" % strays.max(),
+        )
+
+        counted = (count_teeth(driver, tooth), count_teeth(mate, tooth))
+        check(
+            "neither simple gear carries anything but the lobes f(x) has" + label,
+            counted == (pair.driver_lobes, pair.mate_lobes),
+            "%d and %d maxima, against %d and %d lobes"
+            % (counted + (pair.driver_lobes, pair.mate_lobes)),
+        )
+        check(
+            "neither tooth measure reports on gears with no teeth" + label,
+            driver.tooth_interference.Value == 0.0
+            and driver.transmission_error == 0.0,
+            "%.6f mm and %.3g degrees"
+            % (driver.tooth_interference.Value, driver.transmission_error),
+        )
+        separation = driver.Shape.distToShape(mate.Shape)[0]
+        check(
+            "the two pitch lines are drawn touching, not apart" + label,
+            separation < 1e-6,
+            "%.3g mm between them" % separation,
+        )
+
+        before = outline_points(driver)
+        driver.tooth_height = 0.3
+        driver.backlash = "0.4 mm"
+        driver.pressure_angle = 25.0
+        document.recompute()
+        check(
+            "none of the tooth parameters reach a simple gear" + label,
+            np.abs(outline_points(driver) - before).max() == 0.0,
+            "%.3g mm of movement" % np.abs(outline_points(driver) - before).max(),
+        )
+
+        document.removeObject(mate.Name)
+        document.removeObject(driver.Name)
+
+
 INVOLUTE_CASES = (
     ("", {}),
     (", a mate that turns twice", {"function": "1 + 0.45 * cos(2 * x)", "mate_turns": 2}),
@@ -491,6 +566,15 @@ def test_involute_says_what_is_missing(document):
             "Invalid" in refused.State or "Touched" in refused.State,
             refused.State,
         )
+        for style in ("wave", "simple"):
+            other, its_mate = make_pair(document, tooth_style=style)
+            check(
+                "%s teeth are unaffected by ncgears being absent" % style,
+                "Invalid" not in other.State and "Invalid" not in its_mate.State,
+                other.State,
+            )
+            document.removeObject(its_mate.Name)
+            document.removeObject(other.Name)
     finally:
         sys.modules.clear()
         sys.modules.update(blocked)
@@ -505,15 +589,6 @@ def test_involute_says_what_is_missing(document):
         )
     document.removeObject(mate.Name)
     document.removeObject(refused.Name)
-
-    driver, mate = make_pair(document)
-    check(
-        "wave teeth are unaffected by ncgears being absent",
-        "Invalid" not in driver.State and "Invalid" not in mate.State,
-        driver.State,
-    )
-    document.removeObject(mate.Name)
-    document.removeObject(driver.Name)
 
 
 def tooth_size(driver, pair):
@@ -724,22 +799,31 @@ def prominences(radius):
     return np.array(found)
 
 
+def outline_points(gear, samples=6400):
+    """The built shape's outline, in the gear's own frame, as an (n, 2) array.
+
+    Read off the solid rather than the arrays that made it, so a shape built
+    from the wrong points cannot pass. The mate is drawn turned to face the
+    driver, so it is its placement that its outline is brought back through.
+    """
+    outline = min(gear.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
+    home = gear.Placement.inverse()
+    points = [home.multVec(point) for point in outline.discretize(Number=samples)]
+    return np.array([(point.x, point.y) for point in points])
+
+
 def count_teeth(gear, tooth, samples=6400):
     """Teeth on the built shape, counted as maxima of its outline's radius.
 
-    Read off the solid rather than the arrays that made it, so a shape built
-    with the wrong tooth count cannot pass. The default is sixteen points per
-    tooth at the most teeth the workbench allows.
+    The default is sixteen points per tooth at the most teeth the workbench
+    allows.
 
     A maximum has to stand a tenth of ``tooth`` above its surroundings to
     count, which is what separates a tooth from the extremum a sampling leaves
     where the outline's splines meet.
     """
-    outline = min(gear.Shape.Faces, key=lambda face: face.CenterOfMass.z).OuterWire
-    center = gear.Placement.Base
-    points = outline.discretize(Number=samples)
-    radius = np.array([(point - center).Length for point in points])
-    return int(np.sum(prominences(radius) > 0.1 * tooth))
+    points = outline_points(gear, samples)
+    return int(np.sum(prominences(np.hypot(points[:, 0], points[:, 1])) > 0.1 * tooth))
 
 
 def qt_running():
@@ -877,6 +961,7 @@ def main():
     test_turns(document)
     test_rejects_bad_functions(document)
     test_rejects_impossible_turns(document)
+    test_simple_teeth(document)
     test_involute_teeth(document)
     test_involute_thinning(document)
     test_involute_refusals(document)

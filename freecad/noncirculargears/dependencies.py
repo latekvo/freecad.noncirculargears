@@ -156,7 +156,7 @@ def ensure():
     except Exception as failure:
         app.Console.PrintWarning(
             "Non-Circular Gear: could not install {} ({}). Involute teeth "
-            "need it; wave teeth do not.\n".format(
+            "need it; the other styles do not.\n".format(
                 ", ".join(absent), _why(failure)
             )
         )

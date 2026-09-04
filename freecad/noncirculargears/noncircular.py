@@ -384,6 +384,9 @@ def tooth_profiles(pair, num_teeth, points_per_tooth, tooth_height, backlash=0.0
     Neither wave is a conjugate flank, so a curvature mismatch is left over -
     about a hundredth of a tooth for the sine, which is what ``backlash`` is for.
 
+    A ``tooth_height`` of zero leaves the pitch lines themselves, which is the
+    whole of what a gear with no teeth on it is.
+
     Gear 2 is wound the other way round its centre, which is what makes the two
     counter-rotate once gear 2 is turned to face gear 1.
 

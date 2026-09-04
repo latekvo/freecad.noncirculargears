@@ -36,14 +36,14 @@ from . import noncircular
 QT_TRANSLATE_NOOP = app.Qt.QT_TRANSLATE_NOOP
 
 MODES = ["gear ratio", "pitch radius"]
-STYLES = ["wave", "involute"]
+STYLES = ["simple", "wave", "involute"]
 
 # Outline points per B-spline of the wire the gear is drawn from. Splines this
 # short are what keep the extrusion cheap to mesh; see ``outline_wire``.
 POINTS_PER_SPAN = 6
 
 # Outlines already cut, oldest first, against the parameters they were cut
-# from; see ``profiles``. Enough for both styles of a pair, and a few edits back.
+# from; see ``profiles``. Enough for every style of a pair, and a few edits back.
 CUTS_KEPT = 8
 CUTS = collections.OrderedDict()
 
@@ -121,12 +121,13 @@ def profiles(obj, pair, scale):
 def _cut_profiles(obj, pair, scale):
     """The two outlines and how far the pair strays from f(x), as each style measures it.
 
-    Each style is measured its own way, because neither measure fits the other
-    shape. A wave tooth is not conjugate, so what matters is how far it cuts
-    in. An involute flank is, so what matters is the motion it delivers - and
-    it cannot be put through the first measure at all, which reads an outline
-    as a radius against an angle and so needs one a flank with a fillet under
-    it does not give.
+    Each toothed style is measured its own way, because neither measure fits
+    the other shape. A wave tooth is not conjugate, so what matters is how far
+    it cuts in. An involute flank is, so what matters is the motion it delivers
+    - and it cannot be put through the first measure at all, which reads an
+    outline as a radius against an angle and so needs one a flank with a fillet
+    under it does not give. Simple gears are the pitch lines themselves, which
+    roll exactly, so both measures read zero rather than measuring nothing.
     """
     if obj.tooth_style == "involute":
         drive, mate, error = involute.outlines(
@@ -142,6 +143,13 @@ def _cut_profiles(obj, pair, scale):
             obj.samples,
         )
         return drive, mate, 0.0, error
+    if obj.tooth_style == "simple":
+        # A wave of no height is the pitch line, and touching pitch lines
+        # have no two tooth surfaces for backlash to hold apart.
+        drive, mate = noncircular.tooth_profiles(
+            pair, obj.num_teeth, obj.points_per_tooth, 0.0, 0.0
+        )
+        return drive, mate, 0.0, 0.0
     drive, mate = noncircular.tooth_profiles(
         pair,
         obj.num_teeth,
@@ -202,9 +210,10 @@ class NonCircularGear(BaseGear):
             "base",
             QT_TRANSLATE_NOOP(
                 "App::Property",
-                "wave lays a sine along the pitch line, which is quick and "
-                "approximate; involute cuts flanks that roll on it properly, "
-                "which needs the ncgears package and takes seconds",
+                "simple draws the bare pitch lines, with none of the tooth "
+                "parameters reaching them; wave lays a sine along them, which "
+                "is quick and approximate; involute cuts flanks that roll on "
+                "them properly, which needs the ncgears package and takes seconds",
             ),
         )
         obj.tooth_style = STYLES
@@ -298,8 +307,8 @@ class NonCircularGear(BaseGear):
             "accuracy",
             QT_TRANSLATE_NOOP(
                 "App::Property",
-                "angle the involute flanks press at, in degrees; wave teeth "
-                "have no flank angle to set and ignore it",
+                "angle the involute flanks press at, in degrees; the other "
+                "styles have no flank angle to set and ignore it",
             ),
         ).pressure_angle = (20.0, 1.0, 44.0, 0.5)
         obj.addProperty(
@@ -308,8 +317,9 @@ class NonCircularGear(BaseGear):
             "accuracy",
             QT_TRANSLATE_NOOP(
                 "App::Property",
-                "points the outline of one wave tooth is drawn from; involute "
-                "flanks are drawn from as many points as their shape needs",
+                "points a wave tooth is drawn from, or a tooth's worth of a "
+                "simple gear's pitch line; involute flanks are drawn from as "
+                "many points as their shape needs",
             ),
         ).points_per_tooth = (24, 4, 400, 1)
         obj.addProperty(
@@ -346,14 +356,16 @@ class NonCircularGear(BaseGear):
                 "App::PropertyDistance",
                 "deepest wave teeth cut into one another over a revolution; "
                 "negative once backlash holds them apart. 0 for involute "
-                "teeth, which transmission_error measures instead",
+                "teeth, which transmission_error measures instead, and for "
+                "simple gears, which have no teeth",
             ),
             (
                 "transmission_error",
                 "App::PropertyFloat",
                 "worst the motion involute teeth deliver strays from f(x), in "
                 "degrees, as ncgears measures it. 0 for wave teeth, which "
-                "tooth_interference measures instead",
+                "tooth_interference measures instead, and for simple gears, "
+                "which have no teeth",
             ),
         ):
             obj.addProperty(

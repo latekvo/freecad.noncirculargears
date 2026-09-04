@@ -25,8 +25,8 @@ translation between the two - this workbench's f(x), turns and tooth height
 going out, and outlines in the frames its two gear objects are drawn in coming
 back.
 
-ncgears is not required to use this workbench. Without it the wave teeth are
-exactly what they were, and asking for involute ones says what to install.
+ncgears is not required to use this workbench. Without it the other styles are
+exactly what they were, and asking for involute teeth says what to install.
 """
 
 import math
@@ -68,8 +68,8 @@ def _ncgears():
         raise InvoluteUnavailable(
             "involute teeth are cut by ncgears, which is not here. Opening "
             "the workbench fetches it, and the Report view says so if that "
-            "did not work; a headless run wants pip install ncgears. Wave "
-            "teeth need nothing beyond FreeCAD ({})".format(err)
+            "did not work; a headless run wants pip install ncgears. The "
+            "other styles need nothing beyond FreeCAD ({})".format(err)
         )
     return ncgears, PHI
 
