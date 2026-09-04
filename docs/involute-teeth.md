@@ -89,22 +89,45 @@ write. Everything crossing the boundary is a plain float.
 
 ## What it costs
 
-- **Five to fifteen seconds a pair**, against a tenth of a second for the wave,
-  and there is no setting that buys it back. The cost is ncgears' own flank
-  construction and the overlap sweep that verifies it, which between them are
-  about nine tenths of the call. `samples` is already at the 1024 ncgears
-  refuses to go below, and lowering `samples_per_radian` from its default makes
-  the call *slower* - 12 s becomes 21 s at 60 and 30 s at 20 - while moving the
-  outline by a tenth of a micron, because the coarser sampling costs the
-  root-finders more than it saves. ncgears already threads the two gears, which
-  wins a measured 1.57x of the four cores available; the ~31 s of CPU underneath
-  that is what it is.
+- **Seconds a pair**, against a tenth of a second for the wave, and no setting
+  buys it back. `samples` is already at the 1024 ncgears refuses to go below,
+  and lowering `samples_per_radian` from its default makes the call *slower* -
+  12 s becomes 21 s at 60 and 30 s at 20 - while moving the outline by a tenth
+  of a micron, because the coarser sampling costs the root-finders more than it
+  saves. ncgears already threads the two gears, which wins a measured 1.57x of
+  the four cores available.
 
-  So the cost is spent less often rather than made smaller. `profiles` keeps the
-  last eight cuts against the parameters they were cut from, which is what stops
-  a rebuild cutting the pair twice over - once for each half - and lets a style
-  be gone back to for nothing. A refusal is kept the same way, because finding
-  out why a recompute would not build means asking a second time.
+  Half of what it used to cost was ncgears doing work it did not need to do,
+  and that half is why the fork exists. Measured on one core, the default pair:
+
+  |  | stock v0.3.1 | the fork |
+  |---|---|---|
+  | whole call | 7.3 s | 3.7 s |
+  | verifying the pair | 4.5 s | 1.2 s |
+  | cutting the flanks | 2.9 s | 2.5 s |
+
+  Verification was 61% of the call and is now a third of it. It puts the pair
+  through 384 staggered mesh phases and a contact-recovery bisection, and each
+  of the 597 poses that comes to intersected two whole 14,000-vertex polygons.
+  Overlap area lies inside both gears' bounding boxes, so clipping to where
+  those meet leaves the Boolean a tenth of the vertices and cannot change the
+  answer. The rest came from a
+  32,769-sample table being rescaled on each of some 6,600 arc inversions, and
+  from root-finders reaching array code one abscissa at a time. None of it
+  touches the geometry, and the outlines come back bit-identical.
+
+  What is left is the part that is the problem rather than the implementation. A
+  circular gear is one tooth turned about its axis; a non-circular gear has as
+  many different teeth as it has teeth, each an independent two-parameter root
+  find, and about a third of the remaining call is SciPy's generic least-squares
+  setting itself up a hundred times over.
+
+  So the rest of the cost is spent less often rather than made smaller.
+  `profiles` keeps the last eight cuts against the parameters they were cut
+  from, which is what stops a rebuild cutting the pair twice over - once for
+  each half - and lets a style be gone back to for nothing. A refusal is kept
+  the same way, because finding out why a recompute would not build means asking
+  a second time.
 - **shapely and ezdxf**, which FreeCAD does not ship. It does ship numpy, scipy
   and sympy, which ncgears also wants.
 - **An f(x) SymPy can read and differentiate.** `min`, `max` and friends do not

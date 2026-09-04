@@ -65,11 +65,17 @@ def _ncgears():
         import ncgears
         from ncgears.api import PHI
     except ImportError as err:
+        # Imported here rather than at the top so that the module a headless
+        # script imports for its outlines does not drag FreeCAD in with it.
+        from .dependencies import requirement
+
         raise InvoluteUnavailable(
             "involute teeth are cut by ncgears, which is not here. Opening "
             "the workbench fetches it, and the Report view says so if that "
-            "did not work; a headless run wants pip install ncgears. The "
-            "other styles need nothing beyond FreeCAD ({})".format(err)
+            'did not work; a headless run wants pip install "{}". The other '
+            "styles need nothing beyond FreeCAD ({})".format(
+                requirement("ncgears"), err
+            )
         )
     return ncgears, PHI
 
