@@ -14,6 +14,7 @@ import math
 import os
 import sys
 import traceback
+import urllib.parse
 
 # A run is not worth taking the machine over for, so it is held to a share of
 # the cores. Three things thread underneath and only one of them can be asked
@@ -1185,30 +1186,208 @@ def test_what_is_fetched_is_what_is_absent(document):
         sys.modules.update(blocked)
 
 
-def test_both_installers_ask_for_one_build(document):
-    """package.xml and dependencies name the same ncgears, down to the build.
+def test_the_installers_ask_for_one_ncgears(document):
+    """package.xml asks for the package, and the workbench for the build.
 
-    Two installers fetch it - the Addon Manager from package.xml, the workbench
-    itself from ``REQUIREMENTS`` - and they are separately written, so the pair
-    a user ends up with depends on which route they came in by. Since what is
-    asked for now carries a version, drifting apart is a thing that can happen
-    quietly, and the two are compared here so that it cannot.
+    Two installers fetch it and they cannot be asked for the same thing. The
+    Addon Manager hands what it reads straight to a check that imports it, and
+    a requirement that is a URL raises out of that check rather than being
+    installed, so a name is all package.xml can carry. The build is then the
+    workbench's own to insist on, which is also what puts the fork over the
+    stock ncgears the Addon Manager will have left in that directory.
+
+    Read through the Addon Manager's own reader rather than as XML, because
+    where a depend sits decides whether it is read at all: one that is a child
+    of content rather than of the workbench inside it is passed over without a
+    word, and an addon whose dependencies are never read installs cleanly and
+    then cannot cut a tooth.
     """
-    import xml.etree.ElementTree as ElementTree
+    import addonmanager_metadata
+    from Addon import Addon, MissingDependencies
 
     manifest = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "package.xml"
     )
-    asked = [
-        (element.text or "").strip()
-        for element in ElementTree.parse(manifest).iter()
-        if element.tag.endswith("depend") and element.get("type") == "python"
-    ]
-    check(
-        "package.xml asks for the ncgears dependencies.py installs",
-        asked == [dependencies.requirement("ncgears")],
-        "%s against %s" % (asked, [dependencies.requirement("ncgears")]),
+    addon = Addon(
+        "freecad.noncirculargears", "", Addon.Status.NOT_INSTALLED, "main"
     )
+    addon.set_metadata(addonmanager_metadata.MetadataReader.from_file(manifest))
+
+    check(
+        "the Addon Manager is asked for what the workbench installs",
+        all(name in addon.python_requires for name in dependencies.WANTED),
+        "%s against %s" % (sorted(addon.python_requires), list(dependencies.WANTED)),
+    )
+    try:
+        for name in sorted(addon.python_requires):
+            MissingDependencies.package_is_installed(name)
+        looked = "each of them looked up"
+    except Exception as err:
+        looked = "%s: %s" % (type(err).__name__, err)
+    check(
+        "and asked in the terms its own look-up takes",
+        looked == "each of them looked up",
+        looked,
+    )
+    check(
+        "freecad.gears is asked for as the addon it is",
+        addon.requires == {"freecad.gears"},
+        "%s, python %s" % (sorted(addon.requires), sorted(addon.python_requires)),
+    )
+    fetched = urllib.parse.unquote(dependencies.requirement("ncgears"))
+    check(
+        "and what the workbench installs is the build it holds ncgears to",
+        "ncgears-%s-py3" % dependencies.build("ncgears") in fetched,
+        "%s against %s" % (dependencies.build("ncgears"), fetched),
+    )
+
+
+def test_a_stale_ncgears_is_replaced(document):
+    """An ncgears that is here but is not the build asked for is installed over.
+
+    Being importable was the whole question until what is asked for became a
+    particular build. It stopped being it then: whoever used this workbench
+    before it asked for the fork has a stock ncgears in the directory it
+    installs into, and that one cuts every pair they cut, at twice the cost,
+    with nothing about a pair to say so. Installing over a --target directory
+    is also how the other half of that state arises, since pip leaves what is
+    there in place unless it is told to upgrade and reports the build it did
+    not install as installed either way.
+
+    So: that the state is repaired, that the repair is not paid for twice, and
+    that an ncgears the workbench did not put there is reported rather than
+    installed over from underneath - the one arrangement fetching cannot fix,
+    because FreeCAD puts its own directory last.
+    """
+    import importlib
+    import shutil
+    import tempfile
+
+    def package(directory):
+        """An ncgears in ``directory``, as far as importing one goes."""
+        os.makedirs(os.path.join(directory, "ncgears"), exist_ok=True)
+        open(os.path.join(directory, "ncgears", "__init__.py"), "w").close()
+
+    def metadata(directory, version):
+        """The dist-info pip would leave in ``directory`` for that build."""
+        info = os.path.join(directory, "ncgears-%s.dist-info" % version)
+        os.makedirs(info, exist_ok=True)
+        with open(os.path.join(info, "METADATA"), "w") as handle:
+            handle.write(
+                "Metadata-Version: 2.1\nName: ncgears\nVersion: %s\n" % version
+            )
+
+    said = []
+
+    class Report:
+        """The Report view, as far as anything checked here is concerned."""
+
+        @staticmethod
+        def PrintMessage(text):
+            said.append(text)
+
+        @staticmethod
+        def PrintWarning(text):
+            said.append(text)
+
+    class Stub:
+        """What dependencies.py says all of that through."""
+
+        Console = Report
+
+    calls = []
+    fork = dependencies.build("ncgears")
+    vendor = tempfile.mkdtemp()
+    elsewhere = tempfile.mkdtemp()
+
+    def pip(arguments):
+        """pip, doing what it does to a --target directory it installs over."""
+        calls.append(arguments)
+        package(vendor)
+        metadata(vendor, fork)
+
+    kept = dict(sys.modules)
+    path = list(sys.path)
+    original = (
+        dependencies.app,
+        dependencies._pip,
+        dependencies.vendor_directory,
+        dependencies._attempted,
+    )
+    try:
+        for name in [
+            name
+            for name in sys.modules
+            if name == "ncgears" or name.startswith("ncgears.")
+        ]:
+            del sys.modules[name]
+        package(vendor)
+        metadata(vendor, "0.3.1")
+        sys.path.insert(0, vendor)
+        importlib.invalidate_caches()
+        dependencies.app = Stub
+        dependencies._pip = pip
+        dependencies.vendor_directory = lambda: vendor
+        dependencies._attempted = False
+
+        check(
+            "a stock ncgears where the workbench installs is one to install over",
+            dependencies.outdated(vendor) == ["ncgears"],
+            str(dependencies.outdated(vendor)),
+        )
+
+        dependencies.ensure()
+        asked = calls[0] if len(calls) == 1 else []
+        check(
+            "installing over it is an upgrade, and of the fork",
+            "--upgrade" in asked and dependencies.requirement("ncgears") in asked,
+            " ".join(asked) or "%d call(s) to pip" % len(calls),
+        )
+        check(
+            "and the build installed over is taken away with its files",
+            dependencies.in_use("ncgears") == (vendor, [fork]),
+            str(dependencies.in_use("ncgears")),
+        )
+
+        del calls[:]
+        dependencies._attempted = False
+        dependencies.ensure()
+        check(
+            "nothing is fetched again once the fork is what is there",
+            calls == [],
+            " ".join(calls[0]) if calls else "pip was not called",
+        )
+
+        package(elsewhere)
+        metadata(elsewhere, "0.3.1")
+        sys.path.insert(0, elsewhere)
+        importlib.invalidate_caches()
+        del said[:]
+        dependencies._attempted = False
+        dependencies.ensure()
+        check(
+            "an ncgears that comes first on the path is not installed over",
+            calls == [],
+            " ".join(calls[0]) if calls else "pip was not called",
+        )
+        check(
+            "and the Report view is told which one will cut instead",
+            any(elsewhere in line and fork in line for line in said),
+            " ".join(said) or "nothing was said",
+        )
+    finally:
+        (
+            dependencies.app,
+            dependencies._pip,
+            dependencies.vendor_directory,
+            dependencies._attempted,
+        ) = original
+        sys.path[:] = path
+        sys.modules.clear()
+        sys.modules.update(kept)
+        importlib.invalidate_caches()
+        shutil.rmtree(vendor, ignore_errors=True)
+        shutil.rmtree(elsewhere, ignore_errors=True)
 
 
 def test_new_pairs_are_involute(document):
@@ -1256,7 +1435,8 @@ def main():
     test_involute_is_cut_once(document)
     test_new_pairs_are_involute(document)
     test_what_is_fetched_is_what_is_absent(document)
-    test_both_installers_ask_for_one_build(document)
+    test_the_installers_ask_for_one_ncgears(document)
+    test_a_stale_ncgears_is_replaced(document)
 
     if FAILURES:
         print("\n%d check(s) failed: %s" % (len(FAILURES), ", ".join(FAILURES)))
