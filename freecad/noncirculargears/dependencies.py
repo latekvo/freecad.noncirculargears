@@ -45,6 +45,27 @@ from freecad import app
 # and ezdxf - along with it; numpy, scipy and sympy ship with FreeCAD.
 WANTED = ("ncgears",)
 
+# ncgears comes from a fork rather than from PyPI. It is upstream's own v0.3.1
+# with the geometry engine doing the same arithmetic with less work: outlines
+# and every number reported about them come back bit-identical, and a pair is
+# cut in about half the time. NOTICE in the fork records what was changed.
+#
+# A package is asked for by name and installed by requirement, which are the
+# same string for anything off PyPI and are not for this. pip reports what it
+# resolved by name, so the two are kept apart here rather than assumed equal.
+REQUIREMENTS = {
+    "ncgears": (
+        "ncgears @ https://github.com/latekvo/ncgears/releases/download/"
+        "v0.3.1-speedups.1/ncgears-0.3.1%2Bspeedups.1-py3-none-any.whl"
+    ),
+}
+
+
+def requirement(name):
+    """How pip is asked for ``name``, which for most things is the name."""
+    return REQUIREMENTS.get(name, name)
+
+
 def _why(failure):
     """What went wrong, in the words of whatever went wrong."""
     said = getattr(failure, "stderr", None) or getattr(failure, "stdout", None)
@@ -121,7 +142,7 @@ def _what_is_needed(packages, directory):
         report = os.path.join(scratch, "resolved.json")
         _pip(
             ["install", "--dry-run", "--report", report, "--target", directory]
-            + list(packages)
+            + [requirement(name) for name in packages]
         )
         with open(report) as handle:
             resolved = json.load(handle)
@@ -152,7 +173,10 @@ def ensure():
                 ", ".join(needed), directory
             )
         )
-        _pip(["install", "--no-deps", "--target", directory] + needed)
+        _pip(
+            ["install", "--no-deps", "--target", directory]
+            + [requirement(name) for name in needed]
+        )
     except Exception as failure:
         app.Console.PrintWarning(
             "Non-Circular Gear: could not install {} ({}). Involute teeth "

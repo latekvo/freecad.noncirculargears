@@ -34,7 +34,12 @@ Then pick **Non-Circular Gear** from the workbench list and use **Non-Circular
 Gear > Gear Pair**.
 
 Involute teeth are cut by [ncgears](https://github.com/kylebme/ncgears), which
-is what a new pair comes up on, and nothing has to be done about that. The
+is what a new pair comes up on, and nothing has to be done about that. What is
+fetched is [a fork of its
+v0.3.1](https://github.com/latekvo/ncgears/tree/speedups-0.3.1) that cuts a
+pair in about half the time: the geometry engine does the same arithmetic with
+less work, so outlines and every number reported about them come back
+bit-identical to upstream's. The
 Addon Manager installs what `package.xml` asks for; a checkout linked in by
 hand is not installed by the Addon Manager, so the workbench fetches it the
 first time it is opened, into the same directory FreeCAD keeps an addon's
@@ -45,9 +50,13 @@ would be worse than useless - which comes to some 27 MB.
 If that cannot be done, the Report view says why, and a pair says the same
 rather than quietly standing a wave tooth in for an involute one, which would
 leave a pair that is not conjugate looking exactly like one that is. Wave and
-simple gears go on working throughout. To do it by hand:
+simple gears go on working throughout. To do it by hand, with the same build
+`package.xml` asks for:
 
-    pip install ncgears
+    pip install "ncgears @ https://github.com/latekvo/ncgears/releases/download/v0.3.1-speedups.1/ncgears-0.3.1%2Bspeedups.1-py3-none-any.whl"
+
+Upstream's own `pip install ncgears` also works, and cuts the same pairs about
+twice as slowly.
 
 ## What it makes
 
@@ -149,8 +158,7 @@ Raising `num_teeth` lowers it too.
 flanks that are conjugate on the pitch line rather than laid over it, and the
 pair comes back to be placed rather than approximated: 2.4e-7 degrees of
 `transmission_error` for the default pair against 0.012 mm of interference for
-the wave. It is what a new pair starts on. It takes five to fifteen seconds a
-pair rather than a
+the wave. It is what a new pair starts on. It takes seconds rather than a
 tenth of a second, and wants an `f(x)` SymPy can read; outlines already cut are
 kept, so a rebuild that does not change them - the second gear, a style gone
 back to, an edit undone - costs nothing. The two measures do not overlap - each
@@ -169,7 +177,7 @@ It costs what solving the pitch pair costs. It is the way to see the shape
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and forty-five checks: both gears build as valid solids, the pitch
+A hundred and forty-six checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, a simple pair
 comes out on the pitch line `f(x)` asks for with nothing laid on it, both modes
@@ -180,7 +188,8 @@ is refused rather than drawn, the dialog is built and typed into rather than
 described, a new pair comes up on involute teeth and says what to install
 rather than quietly changing style when it cannot cut them, and an involute
 pair is counted as it is rebuilt to show that one cut serves both gears and is
-not paid for twice.
+not paid for twice, and the two installers are held to asking for one and the
+same build of ncgears.
 
 A run holds itself to 40% of the cores - `CPU_SHARE` at the top of the file -
 because ncgears otherwise spreads every cut over the whole machine, which took
@@ -188,7 +197,7 @@ a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
 Thirty-nine of them cut an involute pair and are skipped with a note where
-ncgears is not installed, leaving a hundred and six that run either way -
+ncgears is not installed, leaving a hundred and seven that run either way -
 including the ones that check what is done and said when it is missing. To run
 the lot against an ncgears kept out of FreeCAD's own environment, put it on the
 path for the run:
