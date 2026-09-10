@@ -47,16 +47,25 @@ packages in. It fetches only what is actually absent - numpy, scipy and sympy
 ship with FreeCAD, and a second copy of those on the path in front of them
 would be worse than useless - which comes to some 27 MB.
 
-If that cannot be done, the Report view says why, and a pair says the same
-rather than quietly standing a wave tooth in for an involute one, which would
-leave a pair that is not conjugate looking exactly like one that is. Wave and
-simple gears go on working throughout. To do it by hand, with the same build
-`package.xml` asks for:
+An ncgears that is here but is not the fork is installed over the first time
+the workbench is opened. The Addon Manager's is upstream's - what `package.xml`
+can ask it for is a package and not a build - and so is the one anybody had
+before this workbench asked for the fork; either would otherwise go on cutting
+every pair at twice the cost, with nothing about a pair to say which cut it.
+
+If it cannot be fetched at all, the Report view says why, and a pair says the
+same rather than quietly standing a wave tooth in for an involute one, which
+would leave a pair that is not conjugate looking exactly like one that is.
+Wave and simple gears go on working throughout. To do it by hand, with the
+build the workbench asks for:
 
     pip install "ncgears @ https://github.com/latekvo/ncgears/releases/download/v0.3.1-speedups.1/ncgears-0.3.1%2Bspeedups.1-py3-none-any.whl"
 
 Upstream's own `pip install ncgears` also works, and cuts the same pairs about
-twice as slowly.
+twice as slowly. One installed into site-packages is what cuts them whatever
+the workbench fetches, because FreeCAD puts an addon's own packages after
+site-packages; the Report view names the build a cut will use when it is not
+this one.
 
 ## What it makes
 
@@ -177,7 +186,7 @@ It costs what solving the pitch pair costs. It is the way to see the shape
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and forty-six checks: both gears build as valid solids, the pitch
+A hundred and fifty-five checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, a simple pair
 comes out on the pitch line `f(x)` asks for with nothing laid on it, both modes
@@ -186,10 +195,12 @@ they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
 reaches outside the `math` module or does not repeat as often as the turns need
 is refused rather than drawn, the dialog is built and typed into rather than
 described, a new pair comes up on involute teeth and says what to install
-rather than quietly changing style when it cannot cut them, and an involute
+rather than quietly changing style when it cannot cut them, an involute
 pair is counted as it is rebuilt to show that one cut serves both gears and is
-not paid for twice, and the two installers are held to asking for one and the
-same build of ncgears.
+not paid for twice, the Addon Manager is held to being asked for ncgears
+where it reads and in terms it can look up, an ncgears that is here but is not
+the build asked for is installed over, and one that comes first on the path is
+named rather than fetched under.
 
 A run holds itself to 40% of the cores - `CPU_SHARE` at the top of the file -
 because ncgears otherwise spreads every cut over the whole machine, which took
@@ -197,7 +208,7 @@ a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
 Thirty-nine of them cut an involute pair and are skipped with a note where
-ncgears is not installed, leaving a hundred and seven that run either way -
+ncgears is not installed, leaving a hundred and sixteen that run either way -
 including the ones that check what is done and said when it is missing. To run
 the lot against an ncgears kept out of FreeCAD's own environment, put it on the
 path for the run:
