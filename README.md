@@ -86,16 +86,17 @@ back out, and the property editor reaches the same properties afterwards.
 | `center_distance` | distance between the axes; solved for in pitch radius mode |
 | `num_teeth` | teeth on the driving gear |
 | `mate_turns`, `driver_turns` | turns each gear makes against the other |
-| `height` | extrusion height; `0` leaves the bare outline |
+| `height` | height the gear is raised to; `0` leaves the bare outline |
+| `helix_angle` | angle the teeth lean at across the height; `0` leaves them straight |
 | `tooth_style` | conjugate involute flanks, the default; a wave laid on the pitch line; or simple, which is the pitch line and no teeth |
 | `tooth_height` | tooth height above the pitch line, as a fraction of the circular pitch |
 | `pressure_angle` | angle the involute flanks press at; the other styles have none |
 | `backlash` | gap held open between the two tooth surfaces |
 | `samples`, `points_per_tooth` | how finely `f(x)` and the outline are sampled |
 
-and seven read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
-`max_ratio`, `mate_teeth`, and the two the last section is about,
-`tooth_interference` and `transmission_error`.
+and eight read-only ones: `solved_center_distance`, `ratio_scale`, `min_ratio`,
+`max_ratio`, `mate_teeth`, `helix_sections`, and the two the last section is
+about, `tooth_interference` and `transmission_error`.
 
 ## The two modes
 
@@ -138,6 +139,38 @@ the mate comes out with `driver_turns` times as many teeth.
 
 ![f(x) = 1 + 0.45 * cos(2 * x) with mate_turns = 2](docs/pair-two-to-one.png)
 
+## Teeth that lean
+
+`helix_angle` leans the teeth across the height, and `0` leaves them straight.
+A circular gear is made helical by turning its cross-section about its own axis
+as it rises, which works because turning a circle leaves it where it was. A
+pitch line that is not a circle has no such turn, so what rises instead is the
+teeth: they slide along the pitch line, which stays exactly where it is. The
+gear is then a stack of cross-sections rather than one shape extruded, and
+`helix_sections` says how many it was raised on.
+
+Both gears' teeth slide the same way along the arc the two roll off each other,
+which is what leaves every height meshing - each cross-section of the pair is a
+pair in its own right, conjugate for involute teeth and measured for wave ones
+- and it is also what gives the mate the opposite hand.
+
+![a pair leaning 22 degrees across 14 mm, the mate taking the opposite hand](docs/pair-helical.png)
+
+The sections stand an eighth of a circular pitch apart at most, and the flank
+is ruled from each to the next, which puts the shape halfway between two of
+them 0.005 mm from the pair cut for that height on the default pair. It is
+faceted rather than smooth by exactly that much, and the facet edges are the
+lines running round the picture above.
+
+That is what it costs: **an involute pair is cut once per section**, so a 20
+degree lean over the default pair's 5 mm wants three cuts rather than one, and
+the pair takes some 25 seconds to build against 8 for a straight one - the cut
+is ncgears' own and there is no part of it that a second phase can reuse. Wave
+teeth are not cut at all and go from a fifth of a second to three, which is the
+raising rather than the cutting. A lean steep enough over a height long enough
+to want more than 65 sections is refused rather than raised on sections further
+apart.
+
 ## Four things worth knowing
 
 **Your `f(x)` may be scaled.** The second gear only closes into itself if the
@@ -177,8 +210,10 @@ mapping onto ncgears is and where it refuses.
 
 **`tooth_style = simple` draws no teeth at all.** Both gears come out as their
 bare pitch lines, the way `simple` leaves a freecad.gears gear its pitch
-cylinder. `tooth_height`, `backlash` and `pressure_angle` do not reach it, and
-both measures read 0 because there is nothing laid on either curve to measure.
+cylinder. `tooth_height`, `backlash`, `pressure_angle` and `helix_angle` do not
+reach it - there are no teeth to shape, to hold apart or to lean, and the pitch
+line is the same curve at every height - and both measures read 0 because there
+is nothing laid on either curve to measure.
 It costs what solving the pitch pair costs. It is the way to see the shape
 `f(x)` really comes to, and the way out to anything that cuts its own teeth.
 
@@ -186,29 +221,32 @@ It costs what solving the pitch pair costs. It is the way to see the shape
 
     freecadcmd tests/test_noncirculargears.py
 
-A hundred and fifty-five checks: both gears build as valid solids, the pitch
+A hundred and eighty-one checks: both gears build as valid solids, the pitch
 points meet on the line of centres, the delivered ratio is the one asked for,
 the teeth clear each other and are counted off the built shapes, a simple pair
 comes out on the pitch line `f(x)` asks for with nothing laid on it, both modes
 solve, four pairs that turn at something other than 1:1 come out turning what
-they were asked to, an `f(x)` that goes negative, does not parse, is not finite,
-reaches outside the `math` module or does not repeat as often as the turns need
-is refused rather than drawn, the dialog is built and typed into rather than
-described, a new pair comes up on involute teeth and says what to install
-rather than quietly changing style when it cannot cut them, an involute
-pair is counted as it is rebuilt to show that one cut serves both gears and is
-not paid for twice, the Addon Manager is held to being asked for ncgears
-where it reads and in terms it can look up, an ncgears that is here but is not
-the build asked for is installed over, and one that comes first on the path is
-named rather than fetched under.
+they were asked to, involute teeth stand on the pitch line `f(x)` solved to
+rather than on its reflection, a leaning pair is held against the pair really
+cut for a height between two of its sections and its mate is found to take the
+other hand, teeth leaning too far to raise are refused, an `f(x)` that goes
+negative, does not parse, is not finite, reaches outside the `math` module or
+does not repeat as often as the turns need is refused rather than drawn, the
+dialog is built and typed into rather than described, a new pair comes up on
+involute teeth and says what to install rather than quietly changing style when
+it cannot cut them, an involute pair is counted as it is rebuilt to show that
+one cut serves both gears and is not paid for twice, the Addon Manager is held
+to being asked for ncgears where it reads and in terms it can look up, an
+ncgears that is here but is not the build asked for is installed over, and one
+that comes first on the path is named rather than fetched under.
 
 A run holds itself to 40% of the cores - `CPU_SHARE` at the top of the file -
 because ncgears otherwise spreads every cut over the whole machine, which took
 a run to 85% of it and left nothing to work on. That is why the checks take
 longer than the sum of what they measure.
 
-Thirty-nine of them cut an involute pair and are skipped with a note where
-ncgears is not installed, leaving a hundred and sixteen that run either way -
+Fifty-one of them cut an involute pair and are skipped with a note where
+ncgears is not installed, leaving a hundred and thirty that run either way -
 including the ones that check what is done and said when it is missing. To run
 the lot against an ncgears kept out of FreeCAD's own environment, put it on the
 path for the run:
